@@ -57,3 +57,28 @@ yarn build     # next build
 - `docs/architecture.md` — 三层架构 / 4 处 patch 详情 / HITL 批量审批机制 / stream_mode hack 根因与删除条件 / 升级路径 / 模型行为备忘。**遇到任何"为什么这样设计"、"能不能换 X"、"升级时要注意什么"的问题,先读它。**
 - `docs/DeepAgents 前端开源项目调研.md` — 前端技术选型档案(评估"要不要换栈"时读)。
 - `README.md` — 给最终用户的快速上手 + 验证步骤(本地跑通 demo)。
+
+## SDD 开发流程(轻量版)
+
+任何非琐碎 feature 走 SDD。完整指南:[`docs/sdd/SDD-Guide.md`](docs/sdd/SDD-Guide.md)。
+
+**6 步流程**:
+
+```
+1. Spec Discovery           ──★ 用户确认 ──>
+2. 起草 spec.md             ──>
+3. /sdd-review <dir> spec   ──★ 用户确认 ──>
+4. 起草 tasks.md + verification.md 骨架  ──>
+5. /sdd-review <dir> tasks  (自动)       ──>
+6. 拉分支 → 前端 patch 留底(如需)→ 实现 → verification.md 全绿 → /code-review → PR → 合并
+```
+
+**产物布局**:
+
+- 指南与模板:`docs/sdd/`(`SDD-Guide.md` + `_templates/{spec,tasks,verification}.md`)
+- 单 feature 产物:`docs/features/vX.Y.Z/NNN-feature-slug/{spec,tasks,verification}.md` + `screenshots/`
+- 审查 skill:`.claude/skills/sdd-review/SKILL.md`,用法 `/sdd-review <feature_dir> {spec|tasks}`
+
+**强约束**:`spec.md §4` 必须填全本文件 §强约束 8 行 checkbox;改动若动 `frontend/**`,Step 6 第一步必须 `cd frontend && git diff > /tmp/patches-NNN.diff` 留底。
+
+**两个 ★ 暂停点不能跳过**(Step 1 后的需求理解确认、Step 3 后的 spec 评审通过确认)。
