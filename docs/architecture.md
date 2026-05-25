@@ -119,21 +119,47 @@ export const LOCAL_UI_COMPONENTS = { research_card: ResearchCard };
 
 **扩展新格式时的同步项**:(1) `backend/tools.py` 加新 `export_*` 工具(走 `StateBackend.upload_files` 模式);(2) `backend/agent.py` 注册到 `tools=` + `interrupt_on=`(保持 HITL 一致);(3) `backend/prompts.py` Step 4 加新子项 + Step 0 同义词映射;(4) `frontend/.../FileViewDialog.tsx` 的 `MIME_BY_EXT` 加扩展名→MIME 映射;(5) 本文件本节同步更新。
 
+### 2.6 两种暂停机制:`interrupt_on` vs tool 内 `interrupt()`
+
+本系统在两种语义不同的场景都需要"graph 暂停等用户输入"——它们走两条独立的 LangGraph 通道,**不耦合、可共存于同一 thread**。
+
+| 维度 | `interrupt_on=…`(§2.3 HITL 通道) | tool 内 `interrupt()`(本节) |
+|---|---|---|
+| 触发位置 | tool 调用**前**,middleware 在节点边界拦截 | tool 节点内部,代码主动调 `langgraph.types.interrupt(value)` |
+| 中间件 | `HumanInTheLoopMiddleware` | 无,langgraph 原生 |
+| 用途 | 审批(approve / reject / edit) | 询问(问用户拿信息再继续做事) |
+| `interrupt.value` schema | `{action_requests, review_configs}` | 任意用户自定义(本项目 `request_clarification` 用 `{type, tool_call_id}` sentinel,**仅作触发标志**,前端不从这里拿渲染数据) |
+| Resume payload | `{decisions: [{type:"approve"\|"reject"\|"edit", ...}]}` | 任意用户自定义(本项目是 `Record<string, string \| string[]>` answers dict) |
+| 前端入口组件 | `ToolApprovalInterrupt`(action_requests 存在则渲染) | `ChatMessage.tsx` 内的 `toolCall.name === "request_clarification"` 分支(详见 §3.1 表中 ChatMessage 行) |
+| 前端渲染数据源 | `interrupt.value.action_requests`(短生命周期,resume 后即消失) | **`toolCall.args`**(持久化在 `AIMessage.tool_calls` 里的 messages 数组,checkpointer 永久保存) + `toolCall.result`(对应 `ToolMessage.content`,resume 后被填上) |
+| 前端如何回调 resume | `broadcastResumeInterrupt`(§3.2) prop-drill 给 `ToolApprovalInterrupt` | `useResumeInterrupt()` React Context(§3.1 patch);`ClarificationCard` 自取 callback |
+| 当前用例 | `write_file` / `edit_file` / `task` / `export_docx` | `request_clarification`(Step 0 澄清卡,见 `docs/features/v0.4.0/001-clarification-card/`) |
+
+**何时用哪种**:
+
+- 用户已经明确说要做 X、tool 已经决定参数(`write_file(path, content)`),只需要审批同不同意 → 走 `interrupt_on`(简单、复用现有 `ToolApprovalInterrupt`)
+- 用户**没**给够信息、tool 需要先反问("research LLM agent"——研究哪方面?输出什么格式?)→ 走 tool 内 `interrupt()`(自由设计 args schema + 前端渲染,不耦合审批语义)
+
+**⚠️ langgraph 1.2.x `push_ui_message` 在 interrupt 期间的 caveat**(2026-05-25 实证):`push_ui_message` 内部 (1) 通过 `writer(evt)` 实时 SSE 推送、(2) 通过 `CONFIG_KEY_SEND` 把 channel update 加入 task pending writes。**但在 `interrupt()` halt 期间,pending writes 不持久化到 thread state**(task 没 commit,要等 resume 后才会写到 checkpointer)。直接结果:`GET /threads/{id}` 看到 `values.ui === []`,**用户刷新页面就丢卡片**。这是为什么 `request_clarification` **不走** generative-ui 通道渲染(原本设计是 D 方案——push_ui_message + LOCAL_UI_COMPONENTS),改成从 `toolCall.args` 直接渲染(方案 E)——args 永久持久化在 `AIMessage.tool_calls` 里。未来若 langgraph 修了"interrupt 期间 force-commit channel updates"(或暴露相应 API),可考虑回 D 方案。
+
+**`interrupt()` 的 re-execution 陷阱**(普适知识):`interrupt(value)` 在同一 task 内第一次调用抛 `GraphInterrupt` halt,resume 后 node **从头重跑**,直到这次调用直接 return resume value(不再抛)。这意味着 **`interrupt()` 之前的代码会跑两次**。本项目 `request_clarification` 在 interrupt 之前**无副作用**(已删除原本的 push_ui_message,见上方 caveat),所以无幂等性顾虑。但**未来若在 `interrupt()` 之前加新副作用(写文件 / 调外部 API)前,必须重新评估幂等性**(参考 §2.5 的 dedup 模式)。
+
 ## 3. 跨上游适配的硬约束
 
 本系统基于三个上游:**deepagents**(后端编排框架)、**deep-agents-ui**(vendored 前端,直接 clone 在 `frontend/`)、**@langchain/langgraph-sdk**(前端订阅 SSE 的 SDK)。当前版本下,这三个上游各自存在需要本地适配的硬约束,本章集中记录。每条约束在 §4 都有"何时可拆"的判定。
 
-### 3.1 前端 4 处本地 patch
+### 3.1 前端 6 处本地 patch
 
 `deep-agents-ui` 直接 clone 进 `frontend/`,因为我们要改它(注入本地 generative UI 组件、patch 几处 bug)。**升级路径**:`cd frontend && git pull` 前先 `git diff > /tmp/patches.diff` 留底,升级后 `git apply` 回去。
 
 | 文件 | 修改 | 原因 |
 |---|---|---|
 | `ToolCallBox.tsx` | props 加 `components`,透传给 `LoadExternalComponent` | 让本地 generative UI 组件能命中 |
-| `ChatMessage.tsx` | import `LOCAL_UI_COMPONENTS` 并注入;去掉 `task` 无条件 skip | 让本地组件 registry 生效;让 task HITL 审批卡能显示 |
-| `ChatInterface.tsx` | 新增 `broadcastResumeInterrupt`;ui filter 兼容 `tool_call_id` | 见 §3.2 |
+| `ChatMessage.tsx` | import `LOCAL_UI_COMPONENTS` 并注入;去掉 `task` 无条件 skip;`toolCalls.map` 内加 `request_clarification` 分支,直接渲染 `ClarificationCard` 从 `toolCall.args`(不走 LOCAL_UI_COMPONENTS) | 让本地组件 registry 生效;让 task HITL 审批卡能显示;让 Step 0 澄清卡用持久化数据源渲染(见 §2.6 caveat) |
+| `ChatInterface.tsx` | 新增 `broadcastResumeInterrupt`;ui filter 兼容 `tool_call_id`;用 `<ResumeInterruptProvider>` 包 `processedMessages.map`,把 resume callback 通过 React Context 暴露给 generative-ui 组件 | 见 §3.2;Context 让 `ClarificationCard` 不依赖 prop drill onResume(`LoadExternalComponent` 不透传 onResume) |
 | `useChat.ts` | 装 fetch monkey-patch 过滤 `tools` stream_mode | 见 §3.3 |
-| `generative-ui/{ResearchCard,registry}.tsx` | 新增本地组件 + registry | demo 卡片 |
+| `generative-ui/{ResearchCard,ClarificationCard,registry}.tsx` | 新增本地组件 + registry。**`ResearchCard` 注册到 `LOCAL_UI_COMPONENTS` 走 generative-ui 通道**(后端 `emit_research_card` 调 `push_ui_message`,无 interrupt,正常持久化)。**`ClarificationCard` 不注册到 registry**,由 `ChatMessage.tsx` 直接渲染——`request_clarification` tool 内调 `interrupt()`,push_ui_message 在 interrupt 期间不持久化(§2.6 caveat),所以改从 `toolCall.args` 取数据渲染 | demo 卡片 |
+| `hooks/useResumeInterrupt.tsx` | 新增 React Context + Provider + hook | 让 generative-ui 组件不通过 prop drill 自取 resume callback;见 §2.6 |
 
 #### 3.1.1 ChatMessage.tsx 第 128 行的 task skip
 

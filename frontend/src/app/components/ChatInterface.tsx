@@ -30,6 +30,7 @@ import { useChatContext } from "@/providers/ChatProvider";
 import { cn } from "@/lib/utils";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { FilesPopover } from "@/app/components/TasksFilesSidebar";
+import { ResumeInterruptProvider } from "@/app/hooks/useResumeInterrupt";
 
 interface ChatInterfaceProps {
   assistant: Assistant | null;
@@ -278,7 +279,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
               <p className="text-muted-foreground">加载中...</p>
             </div>
           ) : (
-            <>
+            <ResumeInterruptProvider value={broadcastResumeInterrupt}>
               {processedMessages.map((data, index) => {
                 const messageUi = ui?.filter(
                   (u: any) =>
@@ -307,7 +308,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
                   />
                 );
               })}
-            </>
+            </ResumeInterruptProvider>
           )}
         </div>
       </div>

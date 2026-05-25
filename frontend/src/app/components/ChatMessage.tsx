@@ -5,6 +5,10 @@ import { SubAgentIndicator } from "@/app/components/SubAgentIndicator";
 import { ToolCallBox } from "@/app/components/ToolCallBox";
 import { MarkdownContent } from "@/app/components/MarkdownContent";
 import { LOCAL_UI_COMPONENTS } from "@/app/components/generative-ui/registry";
+import {
+  ClarificationCard,
+  type Question,
+} from "@/app/components/generative-ui/ClarificationCard";
 import type {
   SubAgent,
   ToolCall,
@@ -135,6 +139,37 @@ export const ChatMessage = React.memo<ChatMessageProps>(
                     (tc) => tc.name === "task"
                   )?.id;
                   if (!actionRequest || toolCall.id !== firstTaskId) return null;
+                }
+                if (toolCall.name === "request_clarification") {
+                  // Step 0 澄清卡 — 不走 LOCAL_UI_COMPONENTS / ToolCallBox 通道,
+                  // 因为 langgraph 1.2.1 在 tool 内 interrupt() halt 期间
+                  // push_ui_message 的 pending writes 不持久化(刷新就丢卡片)。
+                  // 改成从 toolCall.args 直接渲染,args 永久持久化在
+                  // AIMessage.tool_calls 里。详见 docs/architecture.md §2.6。
+                  const args = toolCall.args as {
+                    restate?: string;
+                    questions?: Question[];
+                  };
+                  const completed = !!toolCall.result;
+                  let answers:
+                    | Record<string, string | string[]>
+                    | undefined;
+                  if (toolCall.result) {
+                    try {
+                      answers = JSON.parse(toolCall.result);
+                    } catch {
+                      answers = undefined;
+                    }
+                  }
+                  return (
+                    <ClarificationCard
+                      key={toolCall.id}
+                      restate={args.restate ?? ""}
+                      questions={args.questions ?? []}
+                      completed={completed}
+                      answers={answers}
+                    />
+                  );
                 }
                 const toolCallGenUiComponent = ui?.find(
                   (u) => u.metadata?.tool_call_id === toolCall.id
