@@ -52,9 +52,12 @@ def web_search(query: str) -> str:
 
 @tool
 def bisheng_retrieve(query: str, top_k: int = 8) -> str:
-    """从中粮知识库做纯向量+全文检索,返回 top-k 个文档片段(无 LLM 生成)。
+    """从中粮(COFCO)知识库做纯向量+全文检索,返回 top-k 个文档片段(无 LLM 生成)。
 
-    适合查中粮集团内部私域知识。输入自然语言 query,返回带文档名的片段列表。
+    **研究任何子主题时必须首先调用此工具**——本项目的 primary source 是
+    中粮内部知识库,公网搜索不能替代。即便怀疑命中为空,也要先调一次确认覆盖,
+    再决定是否用 web_search 补公开背景。输入自然语言 query,返回带 document_name
+    的片段列表(按 document_name 引用)。
     """
     base_url = os.environ["BISHENG_BASE_URL"].rstrip("/")
     kb_ids = [int(x) for x in os.environ["BISHENG_KB_IDS"].split(",") if x.strip()]
