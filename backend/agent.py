@@ -51,7 +51,6 @@ agent = create_deep_agent(
     interrupt_on={
         "write_file": True,
         "edit_file": True,
-        "task": True,
         "export_docx": True,
     },
 )
