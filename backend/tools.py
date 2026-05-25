@@ -1,11 +1,13 @@
-"""自定义工具:duckduckgo_search / think_tool / emit_research_card / export_docx。"""
+"""自定义工具:duckduckgo_search / bisheng_retrieve / think_tool / emit_research_card / export_docx。"""
 
 import base64
+import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
@@ -30,6 +32,35 @@ def duckduckgo_search(query: str) -> str:
     return "\n\n".join(
         f"[{i + 1}] {r.get('title', '')}\nURL: {r.get('link', '')}\n{(r.get('snippet') or '')[:500]}"
         for i, r in enumerate(results)
+    )
+
+
+@tool
+def bisheng_retrieve(query: str, top_k: int = 8) -> str:
+    """从 BiSheng 知识库做纯向量+全文检索,返回 top-k 个文档片段(无 LLM 生成)。
+
+    适合查公司/团队私域知识。输入自然语言 query,返回带文档名的片段列表。
+    """
+    base_url = os.environ["BISHENG_BASE_URL"].rstrip("/")
+    kb_ids = [int(x) for x in os.environ["BISHENG_KB_IDS"].split(",") if x.strip()]
+    try:
+        resp = httpx.post(
+            f"{base_url}/api/v2/filelib/retrieve",
+            json={"query": query, "knowledge_base_ids": kb_ids, "top_k": top_k},
+            timeout=30.0,
+        )
+        body = resp.json()
+    except Exception as e:
+        return f"BiSheng 检索失败:{e}"
+    if body.get("status_code") != 200:
+        return f"BiSheng 检索失败:{body.get('status_message')}"
+    chunks = body["data"]["chunks"]
+    if not chunks:
+        return "BiSheng 知识库未命中相关内容。"
+    return "\n\n".join(
+        f"[{i + 1}] {c['document_name']} (chunk #{c['chunk_index']}, kb={c['knowledge_id']})\n"
+        f"{c['content'][:15000]}"
+        for i, c in enumerate(chunks)
     )
 
 
@@ -78,7 +109,9 @@ def emit_research_card(
 # FileData.encoding 仍会被默认成 "utf-8"。前端按 encoding 路由会失效。
 # 这里直接返回 Command(update={"files": {...}}) 手工构造 FileData,显式设
 # encoding="base64",绕过上游 bug。
-_MAX_DOCX_BYTES = 10 * 1024 * 1024
+# raw bytes cap;base64 编码后膨胀 ~33%,7.5 MB raw → 10 MB b64,刚好压在
+# deepagents FilesystemBackend.max_file_size_mb=10 状态层硬上限之下。
+_MAX_DOCX_BYTES = 7_500_000
 
 
 def _binary_file_data(b64_content: str) -> dict:
@@ -140,7 +173,18 @@ def export_docx(
             "Make sure write_file(report.md, ...) succeeded before exporting."
         )
 
-    md_text = downloads[0].content.decode("utf-8", errors="replace")
+    try:
+        md_text = downloads[0].content.decode("utf-8")
+    except UnicodeDecodeError as e:
+        return _err(
+            f"export_docx failed: source file {src!r} is not valid UTF-8 ({e}). "
+            "Refusing to silently corrupt the docx output."
+        )
+
+    # 检测 dst 是否已存在(Command(update=) 路径会覆盖,但 backend.write 内置
+    # 「already exists」守卫,这里复刻语义,但允许覆盖并在结果消息里明示)
+    existing = backend.download_files([dst])
+    will_overwrite = existing[0].content is not None
 
     with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
         tmp_path = tmp.name
@@ -160,6 +204,7 @@ def export_docx(
         )
 
     b64 = base64.b64encode(docx_bytes).decode("ascii")
+    overwrite_note = " [overwrote existing file]" if will_overwrite else ""
     return Command(
         update={
             "files": {dst: _binary_file_data(b64)},
@@ -168,6 +213,7 @@ def export_docx(
                     content=(
                         f"Exported {src!r} to {dst!r} "
                         f"({len(docx_bytes) // 1024} KB, base64-encoded in state)"
+                        f"{overwrite_note}"
                     ),
                     tool_call_id=tool_call_id,
                     status="success",

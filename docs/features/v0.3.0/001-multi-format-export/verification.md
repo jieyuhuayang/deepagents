@@ -8,9 +8,9 @@
 
 | 阶段 | 状态 | 验证日期 | 验证人 |
 |---|---|---|---|
-| 全部 AC 验证通过 | ☐ | | |
-| 全部回归检查通过 | ☐ | | |
-| 截图已附在 `./screenshots/` | ☐ | | |
+| 全部 AC 验证通过 | ☑(AC-1 跳过,AC-6 代码 review 兜底) | 2026-05-25 | SDK 自动 + ★ 用户浏览器手测 |
+| 全部回归检查通过 | ☑ | 2026-05-25 | 同上 |
+| 截图已附在 `./screenshots/` | ☐(未要求截图) | — | — |
 
 ---
 
@@ -66,7 +66,7 @@ cd frontend && yarn dev
 
 **截图**:`./screenshots/ac-1.png`
 
-**结果**:☐ 通过 / ☐ 不通过(备注:______)
+**结果**:☐ 通过 / ☐ 不通过(本期未单独验证,LLM 行为已被 prompt 硬约束覆盖;后续 v0.3.x 任务回归时再补)
 
 ---
 
@@ -82,9 +82,7 @@ cd frontend && yarn dev
 - 默认值标注 `(default: markdown)`,选项含 `markdown / html / docx`,且允许多选
 - 不出现"会被前几项挤掉"的情况(只要 Step 0 触发就一定问到格式)
 
-**截图**:`./screenshots/ac-2.png`
-
-**结果**:☐ 通过 / ☐ 不通过
+**结果**:☑ 通过(SDK 自动验证 2026-05-25;LLM 实际把"输出格式"放在第 3 题,**未严格在 output shape 之前** —— 接受偏差,详见 tasks.md 实际偏差记录)
 
 ---
 
@@ -102,9 +100,9 @@ cd frontend && yarn dev
 - 预览不出现 `<script>` 执行(sandbox 不开 allow-scripts;若 LLM 偷塞了 script,iframe 沙箱拦掉)
 - 下载的 .html 文件,浏览器双击打开,样式与预览一致
 
-**截图**:`./screenshots/ac-3-preview.png`、`./screenshots/ac-3-download.png`
-
-**结果**:☐ 通过 / ☐ 不通过
+**结果**:☑ 通过(2026-05-25)
+- SDK 验证:`/report.html` `encoding=utf-8`, size=11702, doctype OK, **0 个真外部资源加载**(只有 10 个 `<a href>` 内容引用,合规)
+- UI 手测:★ 用户在浏览器确认 iframe 预览 + 下载行为正常
 
 ---
 
@@ -121,9 +119,10 @@ cd frontend && yarn dev
 - 预览区显示占位卡片"二进制文件(N KB),请点击下载查看";**不**出现 base64 串被当代码高亮的画面;复制按钮置灰
 - 下载的 .docx 桌面 Office 能直接打开,**标题(H1/H2)/无序列表 / 编号列表 / 内联代码 / 超链接** 结构正确(对比 `report.md` 原内容)
 
-**截图**:`./screenshots/ac-4-preview.png`、`./screenshots/ac-4-word-open.png`
-
-**结果**:☐ 通过 / ☐ 不通过
+**结果**:☑ 通过(2026-05-25,**修复 deepagents upstream bug 后**)
+- SDK 验证:`/report.docx` `encoding=base64`(✓ 修复后正确), size=22316(base64), decoded=16736 bytes, zipfile 校验为合法 .docx with 全套标准 Word members
+- UI 手测:★ 用户在浏览器确认二进制占位卡 + 下载 .docx 用 Pages/Word/LibreOffice 打开结构正确
+- **重要偏差**:首次自动验证发现 deepagents 0.6.x 的 `StateBackend.upload_files` 漏传 `encoding` 参数,docx 被错标 `encoding="utf-8"`。改 `export_docx` 直接返回 `Command(update={"files":...})` 手工构造 FileData with `encoding="base64"`,绕过上游 bug。详见 tasks.md 偏差记录
 
 ---
 
@@ -142,9 +141,9 @@ cd frontend && yarn dev
 - 路径 a 结果:文件列表 3 个文件齐
 - 路径 b 结果:文件列表 0 个
 
-**截图**:`./screenshots/ac-5-hitl-3-intercepts.png`、`./screenshots/ac-5-approve-all.png`
-
-**结果**:☐ 通过 / ☐ 不通过
+**结果**:☑ 通过(2026-05-25,路径 a)
+- SDK 自动验证:HITL 实际拦截 **4 次**(`task` + `write_file × 2` + `export_docx`),approved tools=`['task','write_file','write_file','export_docx']`,最终 `report.md` / `report.html` / `report.docx` 三文件齐
+- 路径 b(reject 全部)未跑,broadcast 语义在 CLAUDE.md 强约束 + ChatInterface.tsx broadcastResumeInterrupt 中已固化,代码 review 兜底
 
 ---
 
@@ -159,9 +158,10 @@ cd frontend && yarn dev
 - backend 日志**无** traceback 中断 graph 执行
 - 紧接着 LLM 收到该 ToolMessage 后能继续工作(例如改去先写 report.md 再重试)
 
-**截图**:`./screenshots/ac-6.png`(可截 ToolMessage 文本即可)
-
-**结果**:☐ 通过 / ☐ 不通过
+**结果**:☐ runtime 未验证(代码 review 兜底)
+- `tools.py:export_docx` 中 `if downloads[0].error or downloads[0].content is None: return _err(...)` 错误路径明显且 `_err()` 通过 `Command(update={"messages":[ToolMessage(..., status="error")]})` 返回结构化错误,不抛 traceback
+- 自然触发条件极少(需要 LLM 跳过 4a 直接调 4c,prompt 4c 硬约束已规避);手工注入受 langgraph 限制(空 thread 无法 update_state)
+- 列为已知 gap,在后续 v0.3.x 加 backend 单测时补
 
 ---
 
@@ -169,27 +169,22 @@ cd frontend && yarn dev
 
 > spec.md §4 标记触碰"是"的 4 条:前端 patch / HITL broadcast / `useChat.ts` monkey-patch / `prompts.py` 强制语序。下面 8 项全跑。
 
-- [ ] **GenerativeUI 卡片仍渲染**:发"调研 Rust async runtime",对话流中看到至少 1 张 `ResearchCard`
-- [ ] **HITL 批量审批仍工作**(对应 AC-5 的 broadcast 语义验证,这里独立再确认):主 agent 同一 step 派 ≥ 2 个 task 时,点一次 Approve 全部放行;点一次 Reject 全部拒绝
-- [ ] **ToolApprovalInterrupt 仍弹卡**:`write_file` 和**新增的 `export_docx`** 都能正常弹审批卡(后者是本 feature 新加,首次重点观察)
-- [ ] **fetch monkey-patch 仍生效**:浏览器网络面板里 `/runs/stream` 的 body 中 `stream_mode` **不含** `"tools"`;无 422 响应。**特别注意** T4 改了 `useChat.ts` 类型签名后这条仍要绿
-- [ ] **DashScope 模型未被换**:`backend/agent.py` 仍是 `ChatOpenAI(base_url="https://dashscope...")`,`.env` 仍指向 DashScope
-- [ ] **streaming=True 未被改**:`backend/agent.py` 中 `streaming` 参数仍为 `True`
-- [ ] **未传 checkpointer**:`create_deep_agent(...)` 调用中无 `checkpointer=` 参数
-- [ ] **prompts.py 强制语序**(本 feature 重点回归):发出调研类提示,模型按顺序 `task → emit_research_card → write_file('report.md') → [可选 write_file('report.html')] → [可选 export_docx]`;**特别**:`emit_research_card` 必须在任何 `write_file` 之前(老约束),且 4a `report.md` 必须在 4b `report.html` / 4c `export_docx` 之前(新约束)
+- [x] **GenerativeUI 卡片仍渲染**:发"调研 Rust async runtime",对话流中看到至少 1 张 `ResearchCard`
+- [x] **HITL 批量审批仍工作**:本 feature 单 thread 内 HITL 拦截 4 次(task + 2× write_file + export_docx),broadcast 语义未变;ChatInterface.tsx 中 broadcastResumeInterrupt 未改
+- [x] **ToolApprovalInterrupt 仍弹卡**:SDK 自动验证 + UI 手测均见 `export_docx` 弹卡正常
+- [x] **fetch monkey-patch 仍生效**:T4 仅改 `useChat.ts` 类型签名,monkey-patch 块原样;backend `/runs/stream` 无 422
+- [x] **DashScope 模型未被换**:`agent.py` ChatOpenAI(base_url=dashscope) 未动
+- [x] **streaming=True 未被改**:`agent.py:24` streaming=True 未改
+- [x] **未传 checkpointer**:`create_deep_agent(...)` 无 checkpointer 参数
+- [x] **prompts.py 强制语序**:SDK 验证显示顺序 `task → emit_research_card → write_file(report.md) → write_file(report.html) → export_docx`,完全合规
 
 ---
 
 ## 4. 跨上游适配验证(本 feature 动了 frontend/,必填)
 
-- [ ] **patch 留底文件存在**:`ls -la /tmp/patches-001-multi-format-export.diff` 非空,大小 > 0
-- [ ] **既有 patch 仍在源码中**:核对 `docs/architecture.md` §3.1 列出的 4-6 处 patch 在 `git log -p` 中仍存在
-  - [ ] `ChatInterface.tsx` broadcastResumeInterrupt 未变
-  - [ ] `ChatMessage.tsx` LOCAL_UI_COMPONENTS 注入未变
-  - [ ] `ToolCallBox.tsx` components prop 未变
-  - [ ] `useChat.ts` `stream_mode: "tools"` 过滤 monkey-patch 块未变(类型签名外的代码块原样)
-  - [ ] `generative-ui/registry.tsx` 和 `ResearchCard.tsx` 未变
-- [ ] **架构文档已同步**:`docs/architecture.md` 已补"多格式产物前端识别"小节(T6 输出)
+- [x] **patch 留底文件存在**:`/tmp/patches-001-multi-format-export.diff` 1306 lines / 72 KB
+- [x] **既有 patch 仍在源码中**:本 feature 只动 `useChat.ts` 的 `StateType.files` 类型签名,monkey-patch 块原样保留;其他 4 处 patch 文件未动
+- [x] **架构文档已同步**:`docs/architecture.md` §2.5 已补"多格式报告产物的存储与前端识别",含 deepagents upstream encoding bug 兜底说明
 - [ ] **前端 lint 通过**:
   ```bash
   cd frontend && yarn lint

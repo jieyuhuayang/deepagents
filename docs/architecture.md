@@ -103,7 +103,11 @@ export const LOCAL_UI_COMPONENTS = { research_card: ResearchCard };
 
 主报告以 `report.md` 为唯一真理来源。用户可在 Step 0 clarification 同时指定 `html`、`docx` 之一或全部,会产生 `report.html`(LLM 直接生成完整 HTML+inline CSS)和/或 `report.docx`(由 `export_docx` 工具调 `pypandoc` 从 md 转换)。
 
-**后端存储**。deepagents `FileData` 是 `{content: str, encoding: "utf-8"|"base64", created_at?, modified_at?}`。文本格式 `encoding="utf-8"`、`content` 是原文;二进制(docx)`encoding="base64"`、`content` 是 base64 字符串。**生成二进制不要手动 base64** —— 直接走 `StateBackend().upload_files([(path, bytes)])`,backend 会尝试 UTF-8 解码,失败自动 base64 编码并设 `encoding="base64"`(见 `deepagents.backends.state.StateBackend.upload_files`)。`export_docx` 走的就是这条路径。`FilesystemBackend.max_file_size_mb=10`,base64 编码会膨胀 ~33%,实际可用源字节上限约 7.5 MB,`export_docx` 内还预校验 docx 字节数 ≤ 10 MB。
+**后端存储**。deepagents `FileData` 是 `{content: str, encoding: "utf-8"|"base64", created_at?, modified_at?}`。文本格式 `encoding="utf-8"`、`content` 是原文;二进制(docx)`encoding="base64"`、`content` 是 base64 字符串。
+
+**⚠️ 不要用 `StateBackend.upload_files()` 写二进制**(2026-05-25 实证)。它内部对 bytes 做 base64 编码后调 `create_file_data(text)`,**漏传 `encoding` 参数**,FileData 仍被默认成 `encoding="utf-8"`,前端按 encoding 路由会失效,docx 被当文本显示。`export_docx`(`backend/tools.py`)的解决方案:**直接返回 `Command(update={"files": {dst: {"content": b64, "encoding": "base64", ...}}})`**,手工构造 FileData 显式设 encoding。后续升级 deepagents 时,如果 upstream 修了 `StateBackend.upload_files` 漏传 encoding 的 bug,可以回退到 backend API 路径(更干净)。
+
+`FilesystemBackend.max_file_size_mb=10`,base64 编码会膨胀 ~33%,实际可用源字节上限约 7.5 MB,`export_docx` 内还预校验 docx 字节数 ≤ 10 MB。
 
 **前端识别**。`useChat.ts` 的 `StateType.files` 类型放宽为 `Record<string, RawFileEntry>`,其中 `RawFileEntry = string | { content, encoding? }`(string 形态保留给旧 checkpoint 兼容)。`TasksFilesSidebar.tsx` 的 `normalizeFileEntry()` 把 `RawFileEntry` 归一成 `FileItem`(`{path, content, encoding}`),`encoding` 字段透传给 `FileViewDialog.tsx`。
 

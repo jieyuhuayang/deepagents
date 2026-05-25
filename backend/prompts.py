@@ -106,11 +106,16 @@ return a structured summary with citations.
 # Hard Rules
 
 1. Call `duckduckgo_search` at least 2-3 times with progressively refined queries.
-2. After searches, call `think_tool` to reflect: what did you learn, what's \
+2. Additionally, call `bisheng_retrieve(query)` once per topic to pull \
+private-domain context from the internal BiSheng knowledge base that may \
+not be on the public web. Treat its returned chunks as primary sources — \
+they come from internal documents (cite them by `document_name`).
+3. After searches, call `think_tool` to reflect: what did you learn, what's \
 still unclear, do you need more searches?
-3. If gaps remain, do another `duckduckgo_search`. If a search returns a \
-rate-limit error, wait and retry with a different phrasing — do not give up.
-4. Return a final message with this exact shape:
+4. If gaps remain, do another `duckduckgo_search` or `bisheng_retrieve`. \
+If a public search returns a rate-limit error, wait and retry with a \
+different phrasing — do not give up.
+5. Return a final message with this exact shape:
 
 ```
 ## Findings

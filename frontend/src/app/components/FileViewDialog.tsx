@@ -126,9 +126,11 @@ export const FileViewDialog = React.memo<{
 
   const binarySizeLabel = useMemo(() => {
     if (!isBinary) return "";
-    // base64 字符串长度 ≈ 原字节数 * 4/3,反推估算
-    return formatBytes(Math.floor((fileContent.length * 3) / 4));
-  }, [isBinary, fileContent.length]);
+    // base64: 每 4 char → 3 bytes;减去 `=` padding(1 或 2 个)精确算原字节数
+    const padding = fileContent.endsWith("==") ? 2 : fileContent.endsWith("=") ? 1 : 0;
+    const bytes = Math.floor((fileContent.length * 3) / 4) - padding;
+    return formatBytes(Math.max(bytes, 0));
+  }, [isBinary, fileContent]);
 
   const handleCopy = useCallback(() => {
     if (isBinary) return; // 二进制 base64 复制无意义,按钮也置灰兜底
@@ -138,7 +140,11 @@ export const FileViewDialog = React.memo<{
   }, [fileContent, isBinary]);
 
   const handleDownload = useCallback(() => {
-    if (!fileContent || !fileName) return;
+    if (!fileName) {
+      toast.error("文件名缺失,无法下载");
+      return;
+    }
+    // 允许 fileContent === "" 的 0-byte 合法文件下载(不再 falsy-zero 误判)
     const mime = MIME_BY_EXT[fileExtension] || (isBinary ? "application/octet-stream" : "text/plain");
     let blob: Blob;
     try {

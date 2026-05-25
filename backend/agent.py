@@ -12,7 +12,7 @@ from deepagents import create_deep_agent
 
 from middlewares import GenerativeUIMiddleware
 from prompts import ORCHESTRATOR_PROMPT, RESEARCH_SUBAGENT_PROMPT
-from tools import duckduckgo_search, emit_research_card, export_docx, think_tool
+from tools import bisheng_retrieve, duckduckgo_search, emit_research_card, export_docx, think_tool
 
 load_dotenv()
 
@@ -32,7 +32,7 @@ research_subagent = {
         "输出：要点摘要 + 引用 URL 列表。"
     ),
     "system_prompt": RESEARCH_SUBAGENT_PROMPT,
-    "tools": [duckduckgo_search, think_tool],
+    "tools": [duckduckgo_search, bisheng_retrieve, think_tool],
 }
 
 agent = create_deep_agent(
