@@ -1,17 +1,18 @@
-"""自定义工具:web_search / bisheng_retrieve / think_tool / emit_research_card / export_docx。"""
+"""自定义工具:web_search / bisheng_retrieve / think_tool / emit_research_card / request_clarification / export_docx。"""
 
 import base64
+import json
 import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, TypedDict
 
 import httpx
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.graph.ui import push_ui_message
-from langgraph.types import Command
+from langgraph.types import Command, interrupt
 
 from web_search import SearchProvider, SearchProviderError
 
@@ -110,6 +111,109 @@ def emit_research_card(
             "messages": [
                 ToolMessage(
                     content=f"Card rendered: {title}",
+                    tool_call_id=tool_call_id,
+                ),
+            ],
+        }
+    )
+
+
+# ─── Step 0 澄清通道:tool 内 langgraph 原生 interrupt() ─────────────────────
+# spec: docs/features/v0.4.0/001-clarification-card/spec.md
+# 何时用本工具 vs interrupt_on (HumanInTheLoopMiddleware):见 docs/architecture.md
+# §2.6 "两种暂停机制 interrupt() vs interrupt_on" 子节。
+#
+# 设计偏离记录(2026-05-25):本工具最初设计走 push_ui_message → state.ui channel
+# 渲染卡片,但实测 langgraph 1.2.1 在 interrupt() halt 期间 pending writes
+# **不持久化**到 thread state(只通过 SSE writer 实时推送)。如果用户在 interrupted
+# 状态下刷新页面,前端拉 thread state 拿到 ui=[],卡片丢失。
+#
+# 修复:删 push_ui_message,完全依赖 `tool_call.args` 持久化(AIMessage.tool_calls
+# 是 messages 数组的一部分,checkpointer 永久保存)。前端 ChatMessage.tsx 检测
+# `toolCall.name === "request_clarification"` 直接渲染 ClarificationCard,
+# props 从 tool_call.args 取(restate / questions),completed/answers 从
+# tool_call.result(即对应 ToolMessage.content 的 JSON)取。
+# 完整偏差说明见 tasks.md 实际偏差记录。
+
+
+class Option(TypedDict):
+    """澄清卡里的一个选项。
+
+    is_default: 标记为默认时,前端 ClarificationCard 打开时该 chip 已 active 且
+        加 ★ 角标。每个 question 恰好 ONE 个 option 应设为 is_default=True
+        (对应 prompt 里的 Silent Default)。
+    """
+
+    value: str
+    label: str
+    is_default: bool
+
+
+class Question(TypedDict):
+    """澄清卡里的一个问题。
+
+    id: 短 snake_case identifier(如 "scope" / "time_window" / "output_formats")。
+        模型自己生成;tool return 的 dict 以此为 key,模型后续读取这个 key 拿用户答案。
+    options: 2-4 个,其中恰好 ONE 个 is_default=True。
+    multi_select: false 单选(替换语义)/ true 多选(append 语义)。
+    """
+
+    id: str
+    question: str
+    options: list[Option]
+    multi_select: bool
+
+
+@tool
+def request_clarification(
+    restate: str,
+    questions: list[Question],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
+    """当用户的研究请求模糊时(Step 0),弹出澄清卡,等待用户答案。
+
+    Use ONLY when the user's question lacks BOTH (a) a concrete topic AND
+    (b) any scoping signal (time window / output formats / output shape /
+    audience / geography / "quick/overview" hint). Call AT MOST ONCE per
+    conversation — if the user's answer is still ambiguous, fall back to
+    Silent Defaults from the system prompt and proceed; never call this
+    tool twice.
+
+    Args:
+        restate: ONE sentence restating what you understood about the topic
+            (appears at the top of the card).
+        questions: 1-3 Question dicts. Priority order when picking which gaps
+            to ask: scope / sub-topic count → output formats → output shape →
+            time window → audience → geography. Exactly ONE option per
+            question must have `is_default: true`.
+
+    Returns:
+        A ToolMessage whose content is the user's answers as a JSON dict,
+        e.g. `{"scope": "both", "output_formats": ["markdown", "html"]}`.
+        Free-text answers (user opens "+ 其他" and types) are surfaced as
+        plain string values:
+        - single-select: free-text REPLACES any chip selection
+        - multi-select: free-text is APPENDED to the list
+        Read the dict to drive `write_todos` scope/depth and Step 4 file
+        formats; if a key is missing or ambiguous, fall back to Silent
+        Defaults.
+    """
+    # Halts on first run (raises GraphInterrupt). On resume within the same
+    # task, returns the value passed by Command(resume=...) — see langgraph
+    # `interrupt()` docstring: "On subsequent invocations within the same
+    # node, returns the value provided during the first invocation".
+    #
+    # No push_ui_message before/after — pending writes during interrupt halt
+    # don't persist to thread state (verified on langgraph 1.2.1). Frontend
+    # renders the card directly from this tool_call's args (persistent in
+    # AIMessage.tool_calls) and the returned ToolMessage content (answers).
+    answers = interrupt({"type": "clarification", "tool_call_id": tool_call_id})
+
+    return Command(
+        update={
+            "messages": [
+                ToolMessage(
+                    content=json.dumps(answers, ensure_ascii=False),
                     tool_call_id=tool_call_id,
                 ),
             ],

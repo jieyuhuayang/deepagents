@@ -76,6 +76,10 @@ export function useChat({
     };
   }, []);
 
+  // SDK 的公开 UseStreamOptions 签名漏掉了 streamMode (只在内部 AnyStreamOptions
+  // 暴露),所以传 streamMode + assistantId 时两个 overload 都不匹配,但运行时接受。
+  // SDK 修齐签名后这个 @ts-expect-error 自己会报错提示清理。详见 §3.3。
+  // @ts-expect-error - streamMode missing from public UseStreamOptions
   const stream = useStream<StateType>({
     assistantId: activeAssistant?.assistant_id || "",
     client: client ?? undefined,
@@ -175,13 +179,41 @@ export function useChat({
     onHistoryRevalidate?.();
   }, [stream, onHistoryRevalidate]);
 
+  // Stale-interrupt guard: before sending a resume, fetch the latest
+  // server-side head and compare its interrupt id with the one the UI
+  // is currently displaying. If they diverge, the UI is stale (most
+  // commonly because another tab/reconnect advanced the thread) and
+  // sending `resume` here would silently fork from the old checkpoint —
+  // skip the submit and refresh local state instead.
   const resumeInterrupt = useCallback(
-    (value: any) => {
+    async (value: any) => {
+      if (!threadId) return;
+      try {
+        const serverState = await client.threads.getState(threadId);
+        const serverInterruptId = (serverState.tasks ?? [])
+          .flatMap((t) => t.interrupts ?? [])[0]?.id;
+        const uiInterruptId = stream.interrupt?.id;
+        if (
+          serverInterruptId &&
+          uiInterruptId &&
+          serverInterruptId !== uiInterruptId
+        ) {
+          console.warn(
+            "[resumeInterrupt] stale UI interrupt; refreshing instead of forking",
+            { ui: uiInterruptId, server: serverInterruptId },
+          );
+          onHistoryRevalidate?.();
+          return;
+        }
+      } catch (e) {
+        // If the head check itself fails, fall through to the original
+        // submit — better to risk a fork than block the user entirely.
+        console.warn("[resumeInterrupt] head check failed; submitting anyway", e);
+      }
       stream.submit(null, { command: { resume: value } });
-      // Update thread list when resuming from interrupt
       onHistoryRevalidate?.();
     },
-    [stream, onHistoryRevalidate]
+    [stream, threadId, client, onHistoryRevalidate]
   );
 
   const stopStream = useCallback(() => {
