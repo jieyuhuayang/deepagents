@@ -76,6 +76,10 @@ export function useChat({
     };
   }, []);
 
+  // SDK 的公开 UseStreamOptions 签名漏掉了 streamMode (只在内部 AnyStreamOptions
+  // 暴露),所以传 streamMode + assistantId 时两个 overload 都不匹配,但运行时接受。
+  // SDK 修齐签名后这个 @ts-expect-error 自己会报错提示清理。详见 §3.3。
+  // @ts-expect-error - streamMode missing from public UseStreamOptions
   const stream = useStream<StateType>({
     assistantId: activeAssistant?.assistant_id || "",
     client: client ?? undefined,
