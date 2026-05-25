@@ -47,7 +47,7 @@ export function ConfigDialog({
 
   const handleSave = () => {
     if (!deploymentUrl || !assistantId) {
-      alert("Please fill in all required fields");
+      alert("请填写所有必填项");
       return;
     }
 
@@ -66,10 +66,9 @@ export function ConfigDialog({
     >
       <DialogContent className="sm:max-w-[525px]">
         <DialogHeader>
-          <DialogTitle>Configuration</DialogTitle>
+          <DialogTitle>配置</DialogTitle>
           <DialogDescription>
-            Configure your LangGraph deployment settings. These settings are
-            saved in your browser&apos;s local storage.
+            配置你的 LangGraph 部署。这些配置会保存到浏览器的 local storage 中。
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
@@ -94,7 +93,7 @@ export function ConfigDialog({
           <div className="grid gap-2">
             <Label htmlFor="langsmithApiKey">
               LangSmith API Key{" "}
-              <span className="text-muted-foreground">(Optional)</span>
+              <span className="text-muted-foreground">(可选)</span>
             </Label>
             <Input
               id="langsmithApiKey"
@@ -110,9 +109,9 @@ export function ConfigDialog({
             variant="outline"
             onClick={() => onOpenChange(false)}
           >
-            Cancel
+            取消
           </Button>
-          <Button onClick={handleSave}>Save</Button>
+          <Button onClick={handleSave}>保存</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

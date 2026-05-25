@@ -122,7 +122,7 @@ function HomePageInner({
                 className="rounded-md border border-border bg-card p-3 text-foreground hover:bg-accent"
               >
                 <MessagesSquare className="mr-2 h-4 w-4" />
-                Threads
+                会话
                 {interruptCount > 0 && (
                   <span className="ml-2 inline-flex min-h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] text-destructive-foreground">
                     {interruptCount}
@@ -142,7 +142,7 @@ function HomePageInner({
               onClick={() => setConfigDialogOpen(true)}
             >
               <Settings className="mr-2 h-4 w-4" />
-              Settings
+              设置
             </Button>
             <Button
               variant="outline"
@@ -152,7 +152,7 @@ function HomePageInner({
               className="border-[#2F6868] bg-[#2F6868] text-white hover:bg-[#2F6868]/80"
             >
               <SquarePen className="mr-2 h-4 w-4" />
-              New Thread
+              新建会话
             </Button>
           </div>
         </header>
@@ -247,15 +247,15 @@ function HomePageContent() {
         />
         <div className="flex h-screen items-center justify-center">
           <div className="text-center">
-            <h1 className="text-2xl font-bold">Welcome to Standalone Chat</h1>
+            <h1 className="text-2xl font-bold">欢迎使用 Deep Agent UI</h1>
             <p className="mt-2 text-muted-foreground">
-              Configure your deployment to get started
+              先配置一下你的部署,然后就可以开始了
             </p>
             <Button
               onClick={() => setConfigDialogOpen(true)}
               className="mt-4"
             >
-              Open Configuration
+              打开配置
             </Button>
           </div>
         </div>
@@ -283,7 +283,7 @@ export default function HomePage() {
     <Suspense
       fallback={
         <div className="flex h-screen items-center justify-center">
-          <p className="text-muted-foreground">Loading...</p>
+          <p className="text-muted-foreground">加载中...</p>
         </div>
       }
     >

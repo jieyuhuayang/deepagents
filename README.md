@@ -17,7 +17,7 @@ backend/agent.py   create_deep_agent(model=ChatOpenAI(DashScope), tools, subagen
 ```
 
 - **LLM**：DashScope OpenAI-compatible 端点（默认 `deepseek-v4-pro`，可换 `qwen-max-latest` 等）
-- **工具**：`tavily_search`（联网搜索）+ `think_tool`（强制反思）+ `emit_research_card`（推 UI 卡片）
+- **工具**：`duckduckgo_search`（联网搜索，无需 API key）+ `think_tool`（强制反思）+ `emit_research_card`（推 UI 卡片）
 - **Sub-agent**：声明式 `research-agent`，主 agent 通过 `task` 工具委派
 - **HITL 拦截点**：`write_file` / `edit_file` / `task`
 - **Generative UI**：本地 React 组件，零 LangSmith CDN 依赖
@@ -47,12 +47,11 @@ deepagents/
 
 ## 准备 API key
 
-去拿两个 key：
+只需要一个 key：
 
 - **DASHSCOPE_API_KEY**：[阿里云百炼控制台](https://bailian.console.aliyun.com/) → API-KEY 管理
-- **TAVILY_API_KEY**：[tavily.com](https://tavily.com) → 注册即送免费额度
 
-LangSmith key **不需要**（本地 generative UI 走本地 bundle）。
+联网搜索用 DuckDuckGo，无需 API key（注意：高频访问会限流，适合 demo，不适合压测）。LangSmith key 也 **不需要**（本地 generative UI 走本地 bundle）。
 
 ## 启动
 
@@ -61,7 +60,7 @@ LangSmith key **不需要**（本地 generative UI 走本地 bundle）。
 ```bash
 cd backend
 cp .env.example .env
-# 编辑 .env，填入 DASHSCOPE_API_KEY 和 TAVILY_API_KEY
+# 编辑 .env，填入 DASHSCOPE_API_KEY
 ```
 
 ### 2. 装后端依赖并启动（终端 A）
@@ -104,7 +103,7 @@ yarn dev           # → http://localhost:3000
 |---|---|---|
 | 1 | 实时 todo | 右侧 sidebar 出现 ≥4 条任务，随对话推进打勾 |
 | 2 | Sub-agent 流 | 主对话出现 3 个 SubAgentIndicator（每框架一个），点可展开 |
-| 3 | Tool call 折叠 | `tavily_search` 调用框可点 ▶ 展开看 query 和返回 |
+| 3 | Tool call 折叠 | `duckduckgo_search` 调用框可点 ▶ 展开看 query 和返回 |
 | 4 | HITL 审批 | 委派 sub-agent 前弹审批卡（task 拦截）+ 写 `report.md` 前再弹（write_file 拦截），可 Approve/Reject/Edit |
 | 5 | Generative UI | 对话流出现 3 张 ResearchCard，样式来自 `frontend/src/app/components/generative-ui/ResearchCard.tsx` |
 
@@ -138,10 +137,9 @@ yarn dev           # → http://localhost:3000
 
 排错、二次开发、或评估这套技术选型？看 [`docs/architecture.md`](docs/architecture.md)：
 
-- 三层架构与关键技术决策（为什么 OpenAI-compat、为什么 vendored 前端）
-- `GenerativeUIMiddleware` 设计（为什么 deepagents state 缺 `ui` 字段、怎么扩）
-- HITL 批量审批：`broadcastResumeInterrupt` 的工作原理与局限
-- deep-agents-ui 的 4 处本地 patch 清单（每处为什么、上游 issue 链接）
-- `stream_mode "tools"` 422 兼容性 hack 的根因与移除条件
-- 环境兼容性踩坑（SOCKS 代理 / yarn vs npm / langgraph dev checkpointer 限制）
-- 模型行为备忘与上游升级路径
+- 三层架构总览与端到端请求流程（§1）
+- 四个子系统的运行机制与决策——编排 / 状态 / 人在回路 / 渲染（§2,含为什么 OpenAI-compat、为什么 vendored 前端、`GenerativeUIMiddleware` 怎么扩）
+- 跨上游适配的硬约束——4 处前端 patch / HITL `broadcastResumeInterrupt` / `stream_mode "tools"` fetch hack（§3）
+- 演进路径:每个适配层"何时可拆"的判定条件（§4）
+
+遇到具体的启动报错、环境兼容性问题（SOCKS 代理 / yarn vs npm / checkpointer 限制）或模型行为偏差,看 [`docs/troubleshooting.md`](docs/troubleshooting.md)。

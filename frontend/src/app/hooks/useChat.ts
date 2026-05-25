@@ -13,10 +13,18 @@ import type { TodoItem } from "@/app/types/types";
 import { useClient } from "@/providers/ClientProvider";
 import { useQueryState } from "nuqs";
 
+// deepagents 后端 state.files 实际是 dict[str, FileData],FileData =
+// {content, encoding, created_at?, modified_at?}。string 形态保留是为了向后
+// 兼容旧 thread checkpoint(未迁移到 FileData 之前的纯字符串)。归一化在
+// TasksFilesSidebar.tsx 的 FilesPopover 里做。
+export type RawFileEntry =
+  | string
+  | { content: string | string[]; encoding?: "utf-8" | "base64" };
+
 export type StateType = {
   messages: Message[];
   todos: TodoItem[];
-  files: Record<string, string>;
+  files: Record<string, RawFileEntry>;
   email?: {
     id?: string;
     subject?: string;
@@ -135,7 +143,7 @@ export function useChat({
   );
 
   const setFiles = useCallback(
-    async (files: Record<string, string>) => {
+    async (files: Record<string, RawFileEntry>) => {
       if (!threadId) return;
       // TODO: missing a way how to revalidate the internal state
       // I think we do want to have the ability to externally manage the state

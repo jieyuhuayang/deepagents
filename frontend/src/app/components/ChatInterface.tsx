@@ -275,7 +275,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
         >
           {isThreadLoading ? (
             <div className="flex items-center justify-center p-8">
-              <p className="text-muted-foreground">Loading...</p>
+              <p className="text-muted-foreground">加载中...</p>
             </div>
           ) : (
             <>
@@ -358,7 +358,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
                                   key="label"
                                   className="ml-[1px] min-w-0 truncate text-sm"
                                 >
-                                  All tasks completed
+                                  所有任务已完成
                                 </span>,
                               ];
                             }
@@ -372,8 +372,8 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
                                   key="label"
                                   className="ml-[1px] min-w-0 truncate text-sm"
                                 >
-                                  Task{" "}
-                                  {totalTasks - groupedTodos.pending.length} of{" "}
+                                  任务{" "}
+                                  {totalTasks - groupedTodos.pending.length} /{" "}
                                   {totalTasks}
                                 </span>,
                                 <span
@@ -395,8 +395,8 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
                                 key="label"
                                 className="ml-[1px] min-w-0 truncate text-sm"
                               >
-                                Task {totalTasks - groupedTodos.pending.length}{" "}
-                                of {totalTasks}
+                                任务 {totalTasks - groupedTodos.pending.length}{" "}
+                                / {totalTasks}
                               </span>,
                             ];
                           })()}
@@ -418,7 +418,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
                           aria-expanded={metaOpen === "files"}
                         >
                           <FileIcon size={16} />
-                          Files (State)
+                          文件 (State)
                           <span className="h-4 min-w-4 rounded-full bg-[#2F6868] px-0.5 text-center text-[10px] leading-[16px] text-white">
                             {Object.keys(files).length}
                           </span>
@@ -450,7 +450,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
                         }
                         aria-expanded={metaOpen === "tasks"}
                       >
-                        Tasks
+                        任务
                       </button>
                     )}
                     {hasFiles && (
@@ -464,14 +464,14 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
                         }
                         aria-expanded={metaOpen === "files"}
                       >
-                        Files (State)
+                        文件 (State)
                         <span className="h-4 min-w-4 rounded-full bg-[#2F6868] px-0.5 text-center text-[10px] leading-[16px] text-white">
                           {Object.keys(files).length}
                         </span>
                       </button>
                     )}
                     <button
-                      aria-label="Close"
+                      aria-label="关闭"
                       className="flex-1"
                       onClick={() => setMetaOpen(null)}
                     />
@@ -491,9 +491,9 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
                             <h3 className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-tertiary">
                               {
                                 {
-                                  pending: "Pending",
-                                  in_progress: "In Progress",
-                                  completed: "Completed",
+                                  pending: "待办",
+                                  in_progress: "进行中",
+                                  completed: "已完成",
                                 }[status]
                               }
                             </h3>
@@ -535,7 +535,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={isLoading ? "Running..." : "Write your message..."}
+              placeholder={isLoading ? "运行中..." : "输入你的消息..."}
               className="font-inherit field-sizing-content flex-1 resize-none border-0 bg-transparent px-[18px] pb-[13px] pt-[14px] text-sm leading-7 text-primary outline-none placeholder:text-tertiary"
               rows={1}
             />
@@ -550,12 +550,12 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
                   {isLoading ? (
                     <>
                       <Square size={14} />
-                      <span>Stop</span>
+                      <span>停止</span>
                     </>
                   ) : (
                     <>
                       <ArrowUp size={18} />
-                      <span>Send</span>
+                      <span>发送</span>
                     </>
                   )}
                 </Button>

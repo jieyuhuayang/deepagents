@@ -86,7 +86,7 @@ export function useThreads(props: {
       });
 
       return threads.map((thread): ThreadItem => {
-        let title = "Untitled Thread";
+        let title = "未命名会话";
         let description = "";
 
         try {
@@ -115,7 +115,7 @@ export function useThreads(props: {
           }
         } catch {
           // Fallback to thread ID
-          title = `Thread ${thread.thread_id.slice(0, 8)}`;
+          title = `会话 ${thread.thread_id.slice(0, 8)}`;
         }
 
         return {
