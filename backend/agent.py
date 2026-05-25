@@ -12,7 +12,7 @@ from deepagents import create_deep_agent
 
 from middlewares import GenerativeUIMiddleware
 from prompts import ORCHESTRATOR_PROMPT, RESEARCH_SUBAGENT_PROMPT
-from tools import emit_research_card, tavily_search, think_tool
+from tools import duckduckgo_search, emit_research_card, export_docx, think_tool
 
 load_dotenv()
 
@@ -32,12 +32,12 @@ research_subagent = {
         "输出：要点摘要 + 引用 URL 列表。"
     ),
     "system_prompt": RESEARCH_SUBAGENT_PROMPT,
-    "tools": [tavily_search, think_tool],
+    "tools": [duckduckgo_search, think_tool],
 }
 
 agent = create_deep_agent(
     model=model,
-    tools=[tavily_search, think_tool, emit_research_card],
+    tools=[duckduckgo_search, think_tool, emit_research_card, export_docx],
     system_prompt=ORCHESTRATOR_PROMPT,
     subagents=[research_subagent],
     middleware=[GenerativeUIMiddleware()],
@@ -45,5 +45,6 @@ agent = create_deep_agent(
         "write_file": True,
         "edit_file": True,
         "task": True,
+        "export_docx": True,
     },
 )

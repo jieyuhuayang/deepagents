@@ -177,7 +177,7 @@ export const ChatMessage = React.memo<ChatMessageProps>(
                     <div className="w-full max-w-full">
                       <div className="bg-surface border-border-light rounded-md border p-4">
                         <h4 className="text-primary/70 mb-2 text-xs font-semibold uppercase tracking-wider">
-                          Input
+                          输入
                         </h4>
                         <div className="mb-4">
                           <MarkdownContent
@@ -187,7 +187,7 @@ export const ChatMessage = React.memo<ChatMessageProps>(
                         {subAgent.output && (
                           <>
                             <h4 className="text-primary/70 mb-2 text-xs font-semibold uppercase tracking-wider">
-                              Output
+                              输出
                             </h4>
                             <MarkdownContent
                               content={extractSubAgentContent(subAgent.output)}

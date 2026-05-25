@@ -50,6 +50,33 @@ const LANGUAGE_MAP: Record<string, string> = {
   makefile: "makefile",
 };
 
+// 多格式产物的 MIME。未列出的扩展名走 text/plain(下载行为不变)。
+// 修改/扩展时记得同步 docs/architecture.md 多格式产出小节。
+const MIME_BY_EXT: Record<string, string> = {
+  md: "text/markdown",
+  markdown: "text/markdown",
+  html: "text/html",
+  htm: "text/html",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  pdf: "application/pdf",
+  json: "application/json",
+  txt: "text/plain",
+};
+
+function base64ToBlob(b64: string, mime: string): Blob {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
 export const FileViewDialog = React.memo<{
   file: FileItem | null;
   onSaveFile: (fileName: string, content: string) => Promise<void>;
@@ -59,6 +86,8 @@ export const FileViewDialog = React.memo<{
   const [isEditingMode, setIsEditingMode] = useState(file === null);
   const [fileName, setFileName] = useState(String(file?.path || ""));
   const [fileContent, setFileContent] = useState(String(file?.content || ""));
+  const fileEncoding: "utf-8" | "base64" = file?.encoding === "base64" ? "base64" : "utf-8";
+  const isBinary = fileEncoding === "base64";
 
   const fileUpdate = useSWRMutation(
     { kind: "files-update", fileName, fileContent },
@@ -68,7 +97,7 @@ export const FileViewDialog = React.memo<{
     },
     {
       onSuccess: () => setIsEditingMode(false),
-      onError: (error) => toast.error(`Failed to save file: ${error}`),
+      onError: (error) => toast.error(`保存文件失败: ${error}`),
     }
   );
 
@@ -84,32 +113,51 @@ export const FileViewDialog = React.memo<{
   }, [fileName]);
 
   const isMarkdown = useMemo(() => {
-    return fileExtension === "md" || fileExtension === "markdown";
-  }, [fileExtension]);
+    return !isBinary && (fileExtension === "md" || fileExtension === "markdown");
+  }, [isBinary, fileExtension]);
+
+  const isHtml = useMemo(() => {
+    return !isBinary && (fileExtension === "html" || fileExtension === "htm");
+  }, [isBinary, fileExtension]);
 
   const language = useMemo(() => {
     return LANGUAGE_MAP[fileExtension] || "text";
   }, [fileExtension]);
 
+  const binarySizeLabel = useMemo(() => {
+    if (!isBinary) return "";
+    // base64 字符串长度 ≈ 原字节数 * 4/3,反推估算
+    return formatBytes(Math.floor((fileContent.length * 3) / 4));
+  }, [isBinary, fileContent.length]);
+
   const handleCopy = useCallback(() => {
+    if (isBinary) return; // 二进制 base64 复制无意义,按钮也置灰兜底
     if (fileContent) {
       navigator.clipboard.writeText(fileContent);
     }
-  }, [fileContent]);
+  }, [fileContent, isBinary]);
 
   const handleDownload = useCallback(() => {
-    if (fileContent && fileName) {
-      const blob = new Blob([fileContent], { type: "text/plain" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+    if (!fileContent || !fileName) return;
+    const mime = MIME_BY_EXT[fileExtension] || (isBinary ? "application/octet-stream" : "text/plain");
+    let blob: Blob;
+    try {
+      blob = isBinary
+        ? base64ToBlob(fileContent, mime)
+        : new Blob([fileContent], { type: mime });
+    } catch (e) {
+      toast.error(`下载失败: ${e instanceof Error ? e.message : String(e)}`);
+      return;
     }
-  }, [fileContent, fileName]);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [fileContent, fileName, fileExtension, isBinary]);
 
   const handleEdit = useCallback(() => {
     setIsEditingMode(true);
@@ -140,7 +188,7 @@ export const FileViewDialog = React.memo<{
     >
       <DialogContent className="flex h-[80vh] max-h-[80vh] min-w-[60vw] flex-col p-6">
         <DialogTitle className="sr-only">
-          {file?.path || "New File"}
+          {file?.path || "新建文件"}
         </DialogTitle>
         <div className="mb-4 flex items-center justify-between border-b border-border pb-4">
           <div className="flex min-w-0 items-center gap-2">
@@ -149,7 +197,7 @@ export const FileViewDialog = React.memo<{
               <Input
                 value={fileName}
                 onChange={(e) => setFileName(e.target.value)}
-                placeholder="Enter filename..."
+                placeholder="输入文件名..."
                 className="text-base font-medium"
                 aria-invalid={!fileNameIsValid}
               />
@@ -167,25 +215,28 @@ export const FileViewDialog = React.memo<{
                   variant="ghost"
                   size="sm"
                   className="h-8 px-2"
-                  disabled={editDisabled}
+                  disabled={editDisabled || isBinary}
+                  title={isBinary ? "二进制文件不支持在线编辑" : undefined}
                 >
                   <Edit
                     size={16}
                     className="mr-1"
                   />
-                  Edit
+                  编辑
                 </Button>
                 <Button
                   onClick={handleCopy}
                   variant="ghost"
                   size="sm"
                   className="h-8 px-2"
+                  disabled={isBinary}
+                  title={isBinary ? "二进制文件无法复制为文本" : undefined}
                 >
                   <Copy
                     size={16}
                     className="mr-1"
                   />
-                  Copy
+                  复制
                 </Button>
                 <Button
                   onClick={handleDownload}
@@ -197,7 +248,7 @@ export const FileViewDialog = React.memo<{
                     size={16}
                     className="mr-1"
                   />
-                  Download
+                  下载
                 </Button>
               </>
             )}
@@ -208,17 +259,35 @@ export const FileViewDialog = React.memo<{
             <Textarea
               value={fileContent}
               onChange={(e) => setFileContent(e.target.value)}
-              placeholder="Enter file content..."
+              placeholder="输入文件内容..."
               className="h-full min-h-[400px] resize-none font-mono text-sm"
             />
           ) : (
             <ScrollArea className="bg-surface h-full rounded-md">
               <div className="p-4">
                 {fileContent ? (
-                  isMarkdown ? (
+                  isBinary ? (
+                    <div className="flex flex-col items-center justify-center gap-3 p-12 text-center">
+                      <FileText className="text-muted-foreground h-12 w-12" />
+                      <p className="text-sm text-muted-foreground">
+                        二进制文件 · {binarySizeLabel}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        预览不可用,请点击右上角「下载」打开
+                      </p>
+                    </div>
+                  ) : isMarkdown ? (
                     <div className="rounded-md p-6">
                       <MarkdownContent content={fileContent} />
                     </div>
+                  ) : isHtml ? (
+                    // sandbox 不开 allow-scripts:防止报告 HTML 注入脚本执行(spec §3.1)
+                    <iframe
+                      title={`HTML preview: ${fileName}`}
+                      srcDoc={fileContent}
+                      sandbox="allow-same-origin"
+                      className="h-[60vh] w-full rounded-md border border-border bg-white"
+                    />
                   ) : (
                     <SyntaxHighlighter
                       language={language}
@@ -242,7 +311,7 @@ export const FileViewDialog = React.memo<{
                 ) : (
                   <div className="flex items-center justify-center p-12">
                     <p className="text-sm text-muted-foreground">
-                      File is empty
+                      文件为空
                     </p>
                   </div>
                 )}
@@ -261,7 +330,7 @@ export const FileViewDialog = React.memo<{
                 size={16}
                 className="mr-1"
               />
-              Cancel
+              取消
             </Button>
             <Button
               onClick={() => fileUpdate.trigger()}
@@ -284,7 +353,7 @@ export const FileViewDialog = React.memo<{
                   className="mr-1"
                 />
               )}
-              Save
+              保存
             </Button>
           </div>
         )}

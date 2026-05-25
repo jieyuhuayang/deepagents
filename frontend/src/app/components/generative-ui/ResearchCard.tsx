@@ -18,7 +18,7 @@ export function ResearchCard({ title, summary, sources }: ResearchCardProps) {
       {sources.length > 0 && (
         <div className="border-t border-border pt-3">
           <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Sources
+            来源
           </h4>
           <ul className="space-y-1">
             {sources.map((url) => (

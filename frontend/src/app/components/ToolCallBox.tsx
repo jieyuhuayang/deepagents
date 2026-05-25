@@ -49,7 +49,7 @@ export const ToolCallBox = React.memo<ToolCallBoxProps>(
 
     const { name, args, result, status } = useMemo(() => {
       return {
-        name: toolCall.name || "Unknown Tool",
+        name: toolCall.name || "未知工具",
         args: toolCall.args || {},
         result: toolCall.result,
         status: toolCall.status || "completed",
@@ -151,7 +151,7 @@ export const ToolCallBox = React.memo<ToolCallBoxProps>(
                   stream={stream}
                   message={uiComponent}
                   namespace={graphId}
-                  meta={{ status, args, result: result ?? "No Result Yet" }}
+                  meta={{ status, args, result: result ?? "暂无结果" }}
                   components={components}
                 />
               </div>
@@ -170,7 +170,7 @@ export const ToolCallBox = React.memo<ToolCallBoxProps>(
                 {Object.keys(args).length > 0 && (
                   <div className="mt-4">
                     <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Arguments
+                      参数
                     </h4>
                     <div className="space-y-2">
                       {Object.entries(args).map(([key, value]) => (
@@ -212,7 +212,7 @@ export const ToolCallBox = React.memo<ToolCallBoxProps>(
                 {result && (
                   <div className="mt-4">
                     <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Result
+                      结果
                     </h4>
                     <pre className="m-0 overflow-x-auto whitespace-pre-wrap break-all rounded-sm border border-border bg-muted/40 p-2 font-mono text-xs leading-7 text-foreground">
                       {typeof result === "string"

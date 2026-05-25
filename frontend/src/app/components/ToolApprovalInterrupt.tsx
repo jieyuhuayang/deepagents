@@ -113,7 +113,7 @@ export function ToolApprovalInterrupt({
           className="text-yellow-600 dark:text-yellow-400"
         />
         <span className="text-xs font-semibold uppercase tracking-wider">
-          Approval Required
+          需要批准
         </span>
       </div>
 
@@ -128,7 +128,7 @@ export function ToolApprovalInterrupt({
       <div className="mb-4 rounded-sm border border-border bg-background p-3">
         <div className="mb-2">
           <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            Tool
+            工具
           </span>
           <p className="mt-1 font-mono text-sm font-medium text-foreground">
             {actionRequest.name}
@@ -138,7 +138,7 @@ export function ToolApprovalInterrupt({
         {isEditing ? (
           <div>
             <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Edit Arguments
+              编辑参数
             </span>
             <div className="mt-2 space-y-3">
               {Object.entries(actionRequest.args).map(([key, value]) => (
@@ -170,7 +170,7 @@ export function ToolApprovalInterrupt({
         ) : (
           <div>
             <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Arguments
+              参数
             </span>
             <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded-sm border border-border bg-muted/40 p-2 font-mono text-xs text-foreground">
               {JSON.stringify(actionRequest.args, null, 2)}
@@ -183,12 +183,12 @@ export function ToolApprovalInterrupt({
       {showRejectionInput && !isEditing && (
         <div className="mb-4">
           <label className="mb-2 block text-xs font-medium text-foreground">
-            Rejection Message (optional)
+            拒绝理由(可选)
           </label>
           <Textarea
             value={rejectionMessage}
             onChange={(e) => setRejectionMessage(e.target.value)}
-            placeholder="Explain why you're rejecting this action..."
+            placeholder="说明你拒绝此操作的原因..."
             className="text-sm"
             rows={2}
             disabled={isLoading}
@@ -206,7 +206,7 @@ export function ToolApprovalInterrupt({
               onClick={cancelEditing}
               disabled={isLoading}
             >
-              Cancel
+              取消
             </Button>
             <Button
               size="sm"
@@ -215,7 +215,7 @@ export function ToolApprovalInterrupt({
               className="bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700"
             >
               <Check size={14} />
-              {isLoading ? "Saving..." : "Save & Approve"}
+              {isLoading ? "保存中..." : "保存并批准"}
             </Button>
           </>
         ) : showRejectionInput ? (
@@ -229,7 +229,7 @@ export function ToolApprovalInterrupt({
               }}
               disabled={isLoading}
             >
-              Cancel
+              取消
             </Button>
             <Button
               variant="destructive"
@@ -237,7 +237,7 @@ export function ToolApprovalInterrupt({
               onClick={handleRejectConfirm}
               disabled={isLoading}
             >
-              {isLoading ? "Rejecting..." : "Confirm Reject"}
+              {isLoading ? "拒绝中..." : "确认拒绝"}
             </Button>
           </>
         ) : (
@@ -251,7 +251,7 @@ export function ToolApprovalInterrupt({
                 className="text-destructive hover:bg-destructive/10"
               >
                 <X size={14} />
-                Reject
+                拒绝
               </Button>
             )}
             {allowedDecisions.includes("edit") && (
@@ -262,7 +262,7 @@ export function ToolApprovalInterrupt({
                 disabled={isLoading}
               >
                 <Pencil size={14} />
-                Edit
+                编辑
               </Button>
             )}
             {allowedDecisions.includes("approve") && (
@@ -276,7 +276,7 @@ export function ToolApprovalInterrupt({
                 )}
               >
                 <Check size={14} />
-                {isLoading ? "Approving..." : "Approve"}
+                {isLoading ? "批准中..." : "批准"}
               </Button>
             )}
           </>
