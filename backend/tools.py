@@ -54,10 +54,11 @@ def web_search(query: str) -> str:
 def bisheng_retrieve(query: str, top_k: int = 8) -> str:
     """从中粮(COFCO)知识库做纯向量+全文检索,返回 top-k 个文档片段(无 LLM 生成)。
 
-    **研究任何子主题时必须首先调用此工具**——本项目的 primary source 是
-    中粮内部知识库,公网搜索不能替代。即便怀疑命中为空,也要先调一次确认覆盖,
-    再决定是否用 web_search 补公开背景。输入自然语言 query,返回带 document_name
-    的片段列表(按 document_name 引用)。
+    适合查中粮集团内部主题:粮油价格、农业产业链、集团业务规范、内部报告等。
+    公网通用主题(技术、行业新闻等)请改用 `web_search`。
+    输入自然语言 query,返回带 document_name 的片段列表(按 document_name 引用)。
+
+    若返回为空,先换更具体/更通用的关键词或拆成子问题再试 1-2 次,不要一次落空就放弃。
     """
     base_url = os.environ["BISHENG_BASE_URL"].rstrip("/")
     kb_ids = [int(x) for x in os.environ["BISHENG_KB_IDS"].split(",") if x.strip()]
@@ -74,7 +75,7 @@ def bisheng_retrieve(query: str, top_k: int = 8) -> str:
         return f"BiSheng 检索失败:{body.get('status_message')}"
     chunks = body["data"]["chunks"]
     if not chunks:
-        return "BiSheng 知识库未命中相关内容。"
+        return "BiSheng 知识库未命中相关内容。换更具体/更通用的关键词,或拆成子问题再试一次。"
     return "\n\n".join(
         f"[{i + 1}] {c['document_name']} (chunk #{c['chunk_index']}, kb={c['knowledge_id']})\n"
         f"{c['content'][:15000]}"

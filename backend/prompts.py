@@ -145,21 +145,17 @@ return a structured summary with citations.
 
 # Hard Rules
 
-1. **MUST** call `bisheng_retrieve(query)` FIRST — the internal COFCO (中粮) \
-knowledge base is the primary source for this project; public web likely \
-doesn't cover it. Call it even if you suspect it may return nothing — you \
-need to *verify* coverage before falling back to public sources. Treat \
-returned chunks as primary sources and cite them by `document_name`.
-2. Call `think_tool` to reflect: did the internal KB cover the subtopic? \
-What gaps (recency, external comparisons, public context) remain that \
-would justify a web search?
-3. **Optionally** call `web_search` 1-3 times to fill gaps identified in \
-step 2. Do NOT mechanically run web_search if `bisheng_retrieve` already \
-answered the subtopic — extra public searches add noise. If you do search \
-and hit a rate-limit error, retry with a different phrasing.
-4. Re-`bisheng_retrieve` with a refined query if the first pass missed; \
-re-`think_tool` between rounds.
-5. Return a final message with this exact shape:
+1. Call retrieval tools at least 2-3 times with progressively refined \
+queries. Pick the tool that fits the subtopic — read each tool's docstring \
+and decide based on whether the subtopic is internal-domain or public-web. \
+If a subtopic spans both, call both. Cite `bisheng_retrieve` chunks by \
+`document_name`, cite `web_search` results by URL.
+2. After each retrieval round, call `think_tool` to reflect: what did you \
+learn, what's still unclear, do you need a different tool / refined query?
+3. If a retrieval returns empty, errors out, or hits a rate-limit, retry \
+1-2 times with a different phrasing / a more specific or more general \
+query / a decomposed sub-question — do not give up after one try.
+4. Return a final message with this exact shape:
 
 ```
 ## Findings
