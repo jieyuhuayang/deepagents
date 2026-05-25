@@ -17,7 +17,7 @@ backend/agent.py   create_deep_agent(model=ChatOpenAI(DashScope), tools, subagen
 ```
 
 - **LLM**：DashScope OpenAI-compatible 端点（默认 `deepseek-v4-pro`，可换 `qwen-max-latest` 等）
-- **工具**：`duckduckgo_search`（联网搜索，无需 API key）+ `think_tool`（强制反思）+ `emit_research_card`（推 UI 卡片）
+- **工具**：`web_search`（联网搜索，provider 走 `SEARCH_PROVIDER` env，默认 duckduckgo，可选 tavily）+ `think_tool`（强制反思）+ `emit_research_card`（推 UI 卡片）
 - **Sub-agent**：声明式 `research-agent`，主 agent 通过 `task` 工具委派
 - **HITL 拦截点**：`write_file` / `edit_file` / `task`
 - **Generative UI**：本地 React 组件，零 LangSmith CDN 依赖
@@ -103,7 +103,7 @@ yarn dev           # → http://localhost:3000
 |---|---|---|
 | 1 | 实时 todo | 右侧 sidebar 出现 ≥4 条任务，随对话推进打勾 |
 | 2 | Sub-agent 流 | 主对话出现 3 个 SubAgentIndicator（每框架一个），点可展开 |
-| 3 | Tool call 折叠 | `duckduckgo_search` 调用框可点 ▶ 展开看 query 和返回 |
+| 3 | Tool call 折叠 | `web_search` 调用框可点 ▶ 展开看 query 和返回 |
 | 4 | HITL 审批 | 委派 sub-agent 前弹审批卡（task 拦截）+ 写 `report.md` 前再弹（write_file 拦截），可 Approve/Reject/Edit |
 | 5 | Generative UI | 对话流出现 3 张 ResearchCard，样式来自 `frontend/src/app/components/generative-ui/ResearchCard.tsx` |
 

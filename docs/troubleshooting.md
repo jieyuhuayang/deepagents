@@ -85,3 +85,5 @@ res = _tavily.invoke({"query": query, "max_results": max_results})
 **修复**:`tavily_search` 工具签名只保留 `query`;`invoke` 时不再传 `max_results`,固定由 `_tavily = TavilySearch(max_results=5)` 实例化时决定。
 
 **延伸警告**:如果未来想给 `tavily_search` 加可调参数(让 LLM 动态控制 `search_depth` / `include_domains` / `country` 等),**不能走"工具签名透传到 invoke"这条路**,会同样踩这个雷。正确做法是在工具函数内部 `client = TavilySearch(max_results=N, search_depth=...)` 每次新建实例——但要权衡性能开销。
+
+**当前规避方案(v0.3.0-002 起)**:`backend/web_search.py` 的 `TavilyProvider` 直接用 `tavily-python` 官方 SDK(`TavilyClient.search(query, max_results=...)`),绕开 `langchain_tavily` 的 `forbidden_params` 黑名单,`max_results` 在 `search()` 调用时即可安全传。仅在切回 `langchain_tavily` 时需重新警惕上面这条。
