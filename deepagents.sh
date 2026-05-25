@@ -15,9 +15,18 @@ stop_all() {
     pkill -f "next-server.*${FRONTEND_PORT}"                            2>/dev/null
     pkill -f "next start.*-p ${FRONTEND_PORT}"                          2>/dev/null
     pkill -f "next dev.*-p ${FRONTEND_PORT}"                            2>/dev/null
-    # 兜底：按工作目录精确匹配（不会误伤 /root 外的 next/node 进程）
+    # 兜底 1：按工作目录精确匹配（不会误伤 /root 外的 next/node 进程）
     for pid in $(pgrep -f "/root/deepagents/(frontend|backend)" 2>/dev/null); do
         kill "$pid" 2>/dev/null
+    done
+    # 兜底 2：按监听端口杀。next-server 的 process title 被 node 改写成
+    # "next-server (vX.Y.Z)",命令行里既没有端口也没有 /root/deepagents 路径,
+    # 上面两层 pkill / pgrep 都匹配不到。这里直接从 ss -ltnp 抓 LISTEN 端口
+    # 的 PID 兜底。\b 端口边界避免 13000 误匹配 130000。
+    for port in "${BACKEND_PORT}" "${FRONTEND_PORT}"; do
+        for pid in $(ss -ltnp 2>/dev/null | grep -E ":${port}\b" | grep -oP 'pid=\K\d+' | sort -u); do
+            kill "$pid" 2>/dev/null
+        done
     done
     sleep 1
 }

@@ -1,4 +1,4 @@
-"""自定义工具:duckduckgo_search / bisheng_retrieve / think_tool / emit_research_card / export_docx。"""
+"""自定义工具:web_search / bisheng_retrieve / think_tool / emit_research_card / export_docx。"""
 
 import base64
 import os
@@ -8,29 +8,43 @@ from pathlib import Path
 from typing import Annotated
 
 import httpx
-from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.graph.ui import push_ui_message
 from langgraph.types import Command
 
-# DuckDuckGo 无需 API key。limit 在实例化时设置,不要在 .results() 里再传
-# 一次性参数 —— 行为与 Tavily 时期保持一致(单一可信入口,避免静默失败)。
-_ddg = DuckDuckGoSearchAPIWrapper(max_results=5)
+from web_search import SearchProvider, SearchProviderError
+
+# 进程级懒加载缓存。Tavily/DDG 客户端内部维护 HTTP session,重建有开销;
+# env 变更需重启 langgraph dev(dev 模式 hot reload 会自动重置)。
+_search_provider: SearchProvider | None = None
+
+
+def _get_provider() -> SearchProvider:
+    global _search_provider
+    if _search_provider is None:
+        name = os.environ.get("SEARCH_PROVIDER", "duckduckgo")
+        _search_provider = SearchProvider.init_search_provider(name)
+    return _search_provider
 
 
 @tool
-def duckduckgo_search(query: str) -> str:
-    """搜索互联网(DuckDuckGo,无需 API key)。输入搜索关键词,返回标题 + URL + 摘要的列表(最多 5 条)。"""
+def web_search(query: str) -> str:
+    """搜索互联网。输入搜索关键词,返回标题 + URL + 摘要的列表(最多 5 条)。
+
+    Provider 由环境变量 SEARCH_PROVIDER 决定(duckduckgo / tavily / cloudsway,默认 duckduckgo)。
+    """
     try:
-        results = _ddg.results(query, max_results=5)
+        results = _get_provider().invoke(query)
+    except SearchProviderError as e:
+        # 限流 / quota / 网络异常都走这里,直接把错误回传给 LLM 让它降级/换词重试
+        return f"搜索失败:{e}(常见于限流、quota 用尽或网络异常,稍后重试或更换关键词)"
     except Exception as e:
-        # DuckDuckGo 高频访问会触发 Ratelimit,直接把错误回传给 LLM 让它降级/换词重试
-        return f"搜索失败:{e}(常见于限流,稍后重试或更换关键词)"
+        return f"搜索失败:{e}"
     if not results:
         return "无搜索结果。试着换更具体或更通用的关键词。"
     return "\n\n".join(
-        f"[{i + 1}] {r.get('title', '')}\nURL: {r.get('link', '')}\n{(r.get('snippet') or '')[:500]}"
+        f"[{i + 1}] {r['title']}\nURL: {r['url']}\n{r['snippet'][:500]}"
         for i, r in enumerate(results)
     )
 

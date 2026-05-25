@@ -32,7 +32,7 @@ yarn build     # next build
 | 文件 | 职责 |
 |---|---|
 | `agent.py` | 装配 LLM / tools / subagents / middleware / HITL 拦截 |
-| `tools.py` | `duckduckgo_search` / `think_tool` / `emit_research_card` |
+| `tools.py` | `web_search`(按 `SEARCH_PROVIDER` 路由)/ `bisheng_retrieve` / `think_tool` / `emit_research_card` / `export_docx` |
 | `prompts.py` | 主 agent + research sub-agent 的 system prompt |
 | `middlewares.py` | `GenerativeUIMiddleware`(注入 `ui` state 字段) |
 | `langgraph.json` | 暴露 graph `research` 给前端 |
