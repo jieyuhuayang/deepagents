@@ -16,6 +16,7 @@ import {
 import { ThreadList } from "@/app/components/ThreadList";
 import { ChatProvider } from "@/providers/ChatProvider";
 import { ChatInterface } from "@/app/components/ChatInterface";
+import { useDeleteThread } from "@/app/hooks/useDeleteThread";
 
 interface HomePageInnerProps {
   config: StandaloneConfig;
@@ -37,6 +38,18 @@ function HomePageInner({
   const [mutateThreads, setMutateThreads] = useState<(() => void) | null>(null);
   const [interruptCount, setInterruptCount] = useState(0);
   const [assistant, setAssistant] = useState<Assistant | null>(null);
+  const { deleteThread } = useDeleteThread();
+
+  const handleThreadDelete = useCallback(
+    async (id: string) => {
+      await deleteThread(id);
+      if (threadId === id) {
+        await setThreadId(null);
+      }
+      mutateThreads?.();
+    },
+    [deleteThread, threadId, setThreadId, mutateThreads],
+  );
 
   const fetchAssistant = useCallback(async () => {
     const isUUID =
@@ -178,6 +191,7 @@ function HomePageInner({
                     onMutateReady={(fn) => setMutateThreads(() => fn)}
                     onClose={() => setSidebar(null)}
                     onInterruptCountChange={setInterruptCount}
+                    onThreadDelete={handleThreadDelete}
                   />
                 </ResizablePanel>
                 <ResizableHandle />

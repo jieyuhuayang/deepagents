@@ -3,11 +3,19 @@
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { Loader2, MessageSquare, X } from "lucide-react";
+import { Loader2, MessageSquare, Trash2, X } from "lucide-react";
 import { useQueryState } from "nuqs";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -116,6 +124,7 @@ interface ThreadListProps {
   onMutateReady?: (mutate: () => void) => void;
   onClose?: () => void;
   onInterruptCountChange?: (count: number) => void;
+  onThreadDelete?: (id: string) => Promise<void>;
 }
 
 export function ThreadList({
@@ -123,9 +132,40 @@ export function ThreadList({
   onMutateReady,
   onClose,
   onInterruptCountChange,
+  onThreadDelete,
 }: ThreadListProps) {
   const [currentThreadId] = useQueryState("threadId");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [deleteTarget, setDeleteTarget] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!deleteTarget || !onThreadDelete) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await onThreadDelete(deleteTarget.id);
+      setDeleteTarget(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "删除失败,请重试");
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [deleteTarget, onThreadDelete]);
+
+  const handleDialogOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open && !isDeleting) {
+        setDeleteTarget(null);
+        setDeleteError(null);
+      }
+    },
+    [isDeleting],
+  );
 
   const threads = useThreads({
     status: statusFilter === "all" ? undefined : statusFilter,
@@ -298,13 +338,20 @@ export function ThreadList({
                   </h4>
                   <div className="flex flex-col gap-1">
                     {groupThreads.map((thread) => (
-                      <button
+                      <div
                         key={thread.id}
-                        type="button"
+                        role="button"
+                        tabIndex={0}
                         onClick={() => onThreadSelect(thread.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onThreadSelect(thread.id);
+                          }
+                        }}
                         className={cn(
-                          "grid w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors duration-200",
-                          "hover:bg-accent",
+                          "group relative grid w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors duration-200",
+                          "hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                           currentThreadId === thread.id
                             ? "border border-primary bg-accent hover:bg-accent"
                             : "border border-transparent bg-transparent"
@@ -326,7 +373,13 @@ export function ThreadList({
                             <p className="flex-1 truncate text-sm text-muted-foreground">
                               {thread.description}
                             </p>
-                            <div className="ml-2 flex-shrink-0">
+                            <div
+                              className={cn(
+                                "ml-2 flex-shrink-0 transition-opacity duration-150",
+                                onThreadDelete && "group-hover:opacity-0"
+                              )}
+                              aria-hidden={onThreadDelete ? true : undefined}
+                            >
                               <div
                                 className={cn(
                                   "h-2 w-2 rounded-full",
@@ -336,7 +389,29 @@ export function ThreadList({
                             </div>
                           </div>
                         </div>
-                      </button>
+                        {onThreadDelete && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteTarget({
+                                id: thread.id,
+                                title: thread.title,
+                              });
+                              setDeleteError(null);
+                            }}
+                            className={cn(
+                              "absolute bottom-1.5 right-1.5 z-10 inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity duration-150",
+                              "hover:bg-destructive/10 hover:text-destructive",
+                              "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                              "group-hover:opacity-100"
+                            )}
+                            aria-label={`删除会话「${thread.title}」`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -365,6 +440,57 @@ export function ThreadList({
           </div>
         )}
       </ScrollArea>
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={handleDialogOpenChange}
+      >
+        <DialogContent showCloseButton={!isDeleting}>
+          <DialogHeader>
+            <DialogTitle>删除会话</DialogTitle>
+            <DialogDescription>
+              {deleteTarget && (
+                <>
+                  确认删除会话「
+                  <span className="font-medium text-foreground">
+                    {deleteTarget.title}
+                  </span>
+                  」?此操作不可撤销,会同时清除该会话的所有消息和中间状态。
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {deleteError && (
+            <p className="text-sm text-destructive">{deleteError}</p>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteTarget(null);
+                setDeleteError(null);
+              }}
+              disabled={isDeleting}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  删除中...
+                </>
+              ) : (
+                "确认删除"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
