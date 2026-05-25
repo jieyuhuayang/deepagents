@@ -48,9 +48,4 @@ agent = create_deep_agent(
     system_prompt=ORCHESTRATOR_PROMPT,
     subagents=[research_subagent],
     middleware=[GenerativeUIMiddleware()],
-    interrupt_on={
-        "write_file": True,
-        "edit_file": True,
-        "export_docx": True,
-    },
 )
