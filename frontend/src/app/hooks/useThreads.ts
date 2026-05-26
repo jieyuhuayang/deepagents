@@ -1,7 +1,7 @@
 import useSWRInfinite from "swr/infinite";
 import type { Thread } from "@langchain/langgraph-sdk";
 import { Client } from "@langchain/langgraph-sdk";
-import { getConfig } from "@/lib/config";
+import { getConfig, resolveDeploymentUrl } from "@/lib/config";
 
 export interface ThreadItem {
   id: string;
@@ -41,7 +41,7 @@ export function useThreads(props: {
         kind: "threads" as const,
         pageIndex,
         pageSize,
-        deploymentUrl: config.deploymentUrl,
+        deploymentUrl: resolveDeploymentUrl(config.deploymentUrl),
         assistantId: config.assistantId,
         apiKey,
         status: props?.status,

@@ -2,7 +2,12 @@
 
 import React, { useState, useEffect, useCallback, useMemo, Suspense } from "react";
 import { useQueryState } from "nuqs";
-import { getConfig, saveConfig, StandaloneConfig } from "@/lib/config";
+import {
+  getConfig,
+  saveConfig,
+  resolveDeploymentUrl,
+  StandaloneConfig,
+} from "@/lib/config";
 import { ConfigDialog } from "@/app/components/ConfigDialog";
 import { Button } from "@/components/ui/button";
 import { Assistant } from "@langchain/langgraph-sdk";
@@ -251,20 +256,10 @@ function HomePageContent() {
   const langsmithApiKey =
     config?.langsmithApiKey || process.env.NEXT_PUBLIC_LANGSMITH_API_KEY || "";
 
-  // langgraph SDK 的 `new URL(apiUrl + path)` 不接受相对 URL，必须绝对。
-  // 当 deploymentUrl 是 `/api/langgraph` 这种同 origin 路径时，在浏览器端
-  // 拼上 `window.location.origin`，让请求走到访客访问的前端 origin 上，
-  // 再由 next.config.ts 的 rewrites 转发到 backend。
-  const resolvedDeploymentUrl = useMemo(() => {
-    if (!config) return "";
-    if (
-      typeof window !== "undefined" &&
-      config.deploymentUrl.startsWith("/")
-    ) {
-      return `${window.location.origin}${config.deploymentUrl}`;
-    }
-    return config.deploymentUrl;
-  }, [config]);
+  const resolvedDeploymentUrl = useMemo(
+    () => (config ? resolveDeploymentUrl(config.deploymentUrl) : ""),
+    [config],
+  );
 
   if (!config) {
     return (
