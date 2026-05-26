@@ -34,7 +34,7 @@ T1 (frontend endpoint 审计 + agent.py 重构 factory)
 
 ### T1 — Frontend endpoint 审计 + `backend/agent.py` 重构为 factory
 
-- **状态**:☐ 待开始 / ☐ 进行中 / ☐ 已完成
+- **状态**:☐ 待开始 / ☐ 进行中 / ☑ 已完成(2026-05-26;endpoint 审计落在 §"实际偏差记录"第 2 行,`build_agent(checkpointer)` factory 就位,module-level `agent = build_agent(None)` fallback 兼容 langgraph dev,`grep "checkpointer=" agent.py` 命中 line 68)
 - **文件**:`backend/agent.py`(修改);Frontend 文件(仅读,不改:`frontend/src/app/hooks/useChat.ts`、`useThreads.tsx`、`providers/ClientProvider.tsx`、`@langchain/langgraph-sdk` 内部 `client.threads.*` / `client.runs.*` / `client.assistants.*` 用法)
 - **逻辑**:
   1. **精确审计**(read-only):grep + 阅读上述前端文件,**列出 deepagents 前端实际触发的所有 HTTP endpoints**(method + path + 请求 body 形状 + SSE 事件类型),作为 T2 实现 server 的 ground truth。把这个列表 commit 进 `backend/server.py` 顶部 docstring 或者本 tasks.md 注释。**若发现 spec §6 第 5 段列出的子集与实际有出入,在 §"实际偏差记录"登记**。
@@ -182,3 +182,4 @@ T1 (frontend endpoint 审计 + agent.py 重构 factory)
 | 日期 | 任务 | 偏差描述 | 处理决定(回改 spec / 接受偏差 / 撤回任务) |
 |---|---|---|---|
 | _(YYYY-MM-DD)_ | T_(N)_ | _(在此填写)_ | _(在此填写)_ |
+| 2026-05-26 | T1 | 精确审计 frontend 实际触发的 endpoint 共 **11 个 + 4 个隐藏调用**。spec.md §6 第 5 段的子集列表与实际有 4 处出入:**漏列** (a) `POST /threads/{id}/history`(useStream `fetchStateHistory: true` 拉历史)、(b) `GET /threads/{id}/runs/{run_id}/stream`(reconnectOnMount 重连用)、(c) `POST /threads/{id}/runs/{run_id}/cancel`(`stream.stop()` 用,`useChat.ts:219`)、(d) `DELETE /threads/{id}`(`useDeleteThread.ts:14`);**表述误差** spec 写"POST /threads/{id}/runs(resume/goto)"实际是通过 `POST /threads/{id}/runs/stream` 路径 + body 含 `command` 字段(resume / goto),不是单独 endpoint。 | **接受偏差,不回 spec(不改 AC、不改强约束触碰)** —— spec.md §6 第 5 段措辞本就标"以下是 spec §6 第 5 段的初稿子集",T1 任务承诺"对照实际更新偏差",此处即为兑现。最终 endpoint 全集落到 `backend/server.py` 顶部 docstring(T2 实施),作为 server 实现的 ground truth:**11 个 endpoint** = 2 Assistants(`GET /assistants/{id}` + `POST /assistants/search`)+ 6 Threads(`POST /threads` + `POST /threads/search` + `DELETE /threads/{id}` + `GET /threads/{id}/state` + `POST /threads/{id}/state` + `POST /threads/{id}/history`)+ 3 Runs(`POST /runs/stream` + `POST /threads/{id}/runs/stream` + `GET /threads/{id}/runs/{run_id}/stream` + `POST /threads/{id}/runs/{run_id}/cancel`)。**fetch monkey-patch 拦截 path pattern** = 包含 `/runs/stream`(覆盖两个 POST 变体)。**stream_mode 期望事件类型** = `values`(完整 state snapshot) / `messages-tuple`(单消息事件)/ `updates`(增量节点更新)。 |
