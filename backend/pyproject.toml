@@ -17,6 +17,9 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "langgraph-checkpoint-postgres>=3.1",
     "langgraph-checkpoint-sqlite>=2.1",
+    # psycopg 3.x 默认是 pure Python,要么需要系统 libpq,要么需要 psycopg[binary] extra
+    # 显式声明 binary wheel 让 pip 自动装(本地 / lab host / docker 内都 work)。
+    "psycopg[binary]>=3.0",
     "asyncpg>=0.29",
     "aiosqlite>=0.20",
     # langgraph-cli[inmem] 仅在 langgraph dev quick smoke 时需要,
