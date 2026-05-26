@@ -463,32 +463,46 @@ async def search_threads(body: dict[str, Any] | None = None, request: Request = 
     sort_order = (body.get("sort_order") or "desc").lower()
 
     saver = request.app.state.saver
+    agent = request.app.state.agent
     # F4 mitigate + 5000 cap 防 OOM;真正根治要 SQL DISTINCT。
     fetch = min(max((offset + limit) * 10, 100), 5000)
+    # Step 1:拿主 graph(checkpoint_ns="")的 thread_id 列表 + 最新 ts。**只看主 graph** —
+    # 因为 deepagents 的 sub-agent(`task` 工具)会在同一 thread_id 下用 ns="tools:..."
+    # 写 checkpoint;dedupe by thread_id 时第一次见到的常是 sub-agent ckpt,channel_values
+    # 是 sub-agent 内部 messages,首条 human 是 task input 而非用户原始 query。
     seen: dict[str, dict[str, Any]] = {}
     async for ck in saver.alist(None, limit=fetch):
+        if ck.config.get("configurable", {}).get("checkpoint_ns") != "":
+            continue
         tid = ck.config.get("configurable", {}).get("thread_id")
         if not tid or tid in seen:
             continue
         ts = ck.checkpoint.get("ts") if ck.checkpoint else None
-        # 只回前端实际用到的几个业务 channel,避免把 langgraph 内部 channel
-        # (例如 'branch:to:model' / '__start__')+ 整个 message 实例栈
-        # 全部 dump 给列表 endpoint(payload bloat + 信息泄漏)。
-        ch = ck.checkpoint.get("channel_values", {}) if ck.checkpoint else {}
-        values_slim = {
-            k: ch[k]
-            for k in ("messages", "todos", "files", "ui")
-            if k in ch
-        }
         seen[tid] = {
             "thread_id": tid,
             "created_at": ts,
             "updated_at": ts,
             "metadata": ck.metadata or {},
             "status": "idle",
-            # config 也走 _thin_checkpoint,不泄漏 graph_id / __pregel_* 等内部字段
             "config": {"configurable": _thin_checkpoint(ck.config.get("configurable")) or {}},
-            "values": values_slim,
+            # values 在 Step 2 用 agent.aget_state 填充
+            "values": {},
+        }
+    # Step 2:对每个主 graph thread 调 agent.aget_state,让 LangGraph 做 reducer-replay
+    # 重建真实 channel_values(DeltaChannel snapshot_frequency=50 下,raw checkpoint 的
+    # channel_values["messages"] 在非-snapshot step 上根本不存在 messages key,要
+    # walk DeltaSnapshot 祖先 + replay reducer 才能拿到完整 list)。
+    # 只回前端实际用的 4 个业务 channel,避免泄漏 langgraph 内部 channel。
+    for tid, item in seen.items():
+        try:
+            state = await agent.aget_state(_build_config(tid))
+            full_values = (getattr(state, "values", None) or {}) if state is not None else {}
+        except Exception:
+            full_values = {}
+        item["values"] = {
+            k: full_values[k]
+            for k in ("messages", "todos", "files", "ui")
+            if k in full_values
         }
     # F5 + 排序:无 ts 的 thread(新建未跑过)在 desc(最常用)模式下排队首
     # (当作最新);asc 模式下排队尾(列表底)。简化:None 永远给 primary=1,
