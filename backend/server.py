@@ -466,14 +466,13 @@ async def search_threads(body: dict[str, Any] | None = None, request: Request = 
     agent = request.app.state.agent
     # F4 mitigate + 5000 cap 防 OOM;真正根治要 SQL DISTINCT。
     fetch = min(max((offset + limit) * 10, 100), 5000)
-    # Step 1:拿主 graph(checkpoint_ns="")的 thread_id 列表 + 最新 ts。**只看主 graph** —
-    # 因为 deepagents 的 sub-agent(`task` 工具)会在同一 thread_id 下用 ns="tools:..."
-    # 写 checkpoint;dedupe by thread_id 时第一次见到的常是 sub-agent ckpt,channel_values
-    # 是 sub-agent 内部 messages,首条 human 是 task input 而非用户原始 query。
+    # Step 1:dedupe 出所有 thread_id。**不在这里过滤 checkpoint_ns** —— deepagents 的
+    # sub-agent (`task` 工具)在同一 thread_id 下用 ns="tools:..." 写大量 checkpoint;
+    # 如果先过滤 ns="" 再用 fetch limit,sub-agent ckpt 会占满 fetch 配额导致主 graph
+    # ckpt 被截断(实测 lab host: 100 fetch 全是 sub-agent ns="tools:...",ns="" 主 graph
+    # 11 个 ckpt 在 100+ 位置被截掉)。
     seen: dict[str, dict[str, Any]] = {}
     async for ck in saver.alist(None, limit=fetch):
-        if ck.config.get("configurable", {}).get("checkpoint_ns") != "":
-            continue
         tid = ck.config.get("configurable", {}).get("thread_id")
         if not tid or tid in seen:
             continue
@@ -484,14 +483,18 @@ async def search_threads(body: dict[str, Any] | None = None, request: Request = 
             "updated_at": ts,
             "metadata": ck.metadata or {},
             "status": "idle",
+            # config 走 _thin_checkpoint(配 ns="",由 _build_config 在 Step 2 填) —
+            # 不泄漏 graph_id / __pregel_* 等内部字段。
             "config": {"configurable": _thin_checkpoint(ck.config.get("configurable")) or {}},
             # values 在 Step 2 用 agent.aget_state 填充
             "values": {},
         }
-    # Step 2:对每个主 graph thread 调 agent.aget_state,让 LangGraph 做 reducer-replay
-    # 重建真实 channel_values(DeltaChannel snapshot_frequency=50 下,raw checkpoint 的
-    # channel_values["messages"] 在非-snapshot step 上根本不存在 messages key,要
-    # walk DeltaSnapshot 祖先 + replay reducer 才能拿到完整 list)。
+    # Step 2:对每个 thread 调 agent.aget_state(_build_config(tid)) 拿主 graph 的
+    # reducer-resolved state —— _build_config 默认 ns="" 即主 graph。这步关键作用:
+    # (a) 不管 Step 1 alist 拿到的是 sub-agent 还是主 graph ckpt,都重新指向主 graph;
+    # (b) DeltaChannel(snapshot_frequency=50) 在非-snapshot step 上根本不在
+    #     channel_values 含 messages key,要 walk DeltaSnapshot 祖先 + replay reducer
+    #     才能拿到完整 list。aget_state 内部就做这个。
     # 只回前端实际用的 4 个业务 channel,避免泄漏 langgraph 内部 channel。
     for tid, item in seen.items():
         try:
