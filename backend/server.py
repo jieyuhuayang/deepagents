@@ -171,21 +171,24 @@ def _sse_event(event_type: str, data: Any) -> bytes:
 # 校验 / Helpers
 # ---------------------------------------------------------------------------
 
-VALID_STREAM_MODES = {"values", "messages-tuple", "messages", "updates", "events", "debug", "custom"}
+# langgraph 本地 Pregel StreamMode Literal(verified: langgraph.types.StreamMode.__args__)
+# 不含 'events';"messages-tuple" 是 LangGraph SDK 客户端的 alias,需要翻译。
+VALID_STREAM_MODES = {"values", "messages-tuple", "messages", "updates", "debug", "custom"}
 
 # LangGraph SDK 客户端名 → 本地 Pregel 内部 stream_mode 名。
-# LangGraph SDK 协议沿用 "messages-tuple"(参考 RemoteGraph),本地 Pregel 的 StreamMode
-# Literal 只识别 "messages"(verified: langgraph.types.StreamMode.__args__);若直接把
-# "messages-tuple" 传给 agent.astream,该 mode silent no-op,前端打字动画完全收不到事件。
-# 这里做双向映射:接收 client 名时翻译成 langgraph 名;emit SSE 时再翻回 client 名。
 _CLIENT_TO_LG_MODE = {"messages-tuple": "messages"}
 
 
 def _validate_stream_mode(stream_mode: Any) -> list[tuple[str, str]]:
-    """规范化为 list[(client_name, langgraph_name)];含 "tools" 则 422(守护前端 monkey-patch)。"""
+    """规范化为 list[(client_name, langgraph_name)];含 "tools" 则 422。
+
+    去重:client 名重复时只保留首次出现;两个 client 名映射到同一 langgraph 名时
+    (例如同时传 "messages" + "messages-tuple")显式 422 拒掉 ambiguous duplicate。
+    """
     if stream_mode is None:
         return [("values", "values")]
-    modes = stream_mode if isinstance(stream_mode, list) else [stream_mode]
+    raw = stream_mode if isinstance(stream_mode, list) else [stream_mode]
+    modes = list(dict.fromkeys(raw))  # client 名 dedup,保留首次顺序
     if "tools" in modes:
         raise HTTPException(
             status_code=422,
@@ -193,7 +196,7 @@ def _validate_stream_mode(stream_mode: Any) -> list[tuple[str, str]]:
                 "msg": "stream_mode 'tools' is not supported by this server; "
                 "frontend useChat.ts monkey-patch should have filtered it. "
                 "See CLAUDE.md §强约束 #7 + 002 spec.md AC-5.",
-                "got": modes,
+                "got": raw,
             },
         )
     unknown = set(modes) - VALID_STREAM_MODES
@@ -201,7 +204,23 @@ def _validate_stream_mode(stream_mode: Any) -> list[tuple[str, str]]:
         raise HTTPException(
             status_code=422, detail={"msg": "unknown stream_mode", "unknown": list(unknown)}
         )
-    return [(m, _CLIENT_TO_LG_MODE.get(m, m)) for m in modes]
+    lg_seen: dict[str, str] = {}
+    pairs: list[tuple[str, str]] = []
+    for m in modes:
+        lg = _CLIENT_TO_LG_MODE.get(m, m)
+        if lg in lg_seen:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "msg": (
+                        f"stream_mode {m!r} maps to langgraph {lg!r}, which was "
+                        f"already requested via {lg_seen[lg]!r}; pick one."
+                    ),
+                },
+            )
+        lg_seen[lg] = m
+        pairs.append((m, lg))
+    return pairs
 
 
 def _build_config(thread_id: str | None, extra: dict[str, Any] | None = None) -> RunnableConfig:
@@ -229,6 +248,35 @@ def _map_command(cmd: dict[str, Any] | None) -> Command | None:
     )
 
 
+# LangGraph SDK Checkpoint shape:{thread_id, checkpoint_ns, checkpoint_id, checkpoint_map}
+# 不应回流 server 内部的 graph_id 等字段。
+_CHECKPOINT_KEYS = ("thread_id", "checkpoint_ns", "checkpoint_id", "checkpoint_map")
+
+
+def _thin_checkpoint(configurable: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not configurable:
+        return None
+    return {k: configurable[k] for k in _CHECKPOINT_KEYS if k in configurable}
+
+
+# Sort-by 白名单:防 sort_by="metadata"(dict)在 dict<dict 比较时触发 TypeError 500。
+_ALLOWED_SORT_BY = {"thread_id", "created_at", "updated_at"}
+
+
+def _safe_int(raw: Any, *, default: int, field: str) -> int:
+    """body 里的整数字段:None → default;不可转 int 则 422。`0` 被视为合法显式输入,
+    不会回落到 default(避免 limit=0 走 falsy 转默认的语义反转)。"""
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as e:
+        raise HTTPException(
+            status_code=422,
+            detail={"msg": f"{field} must be int", "got": raw},
+        ) from e
+
+
 def _serialize_state(state: Any) -> dict[str, Any]:
     """StateSnapshot → JSON-serializable dict (LangGraph SDK ThreadState 形状)。"""
     if state is None:
@@ -250,10 +298,10 @@ def _serialize_state(state: Any) -> dict[str, Any]:
         "values": getattr(state, "values", {}) or {},
         "next": list(getattr(state, "next", ()) or ()),
         "tasks": tasks,
-        "checkpoint": getattr(state, "config", {}).get("configurable", {}) if getattr(state, "config", None) else None,
+        "checkpoint": _thin_checkpoint(getattr(state, "config", {}).get("configurable") if getattr(state, "config", None) else None),
         "metadata": getattr(state, "metadata", {}) or {},
         "created_at": getattr(state, "created_at", None),
-        "parent_checkpoint": getattr(state, "parent_config", {}).get("configurable", {}) if getattr(state, "parent_config", None) else None,
+        "parent_checkpoint": _thin_checkpoint(getattr(state, "parent_config", {}).get("configurable") if getattr(state, "parent_config", None) else None),
         "interrupts": [
             {"id": getattr(i, "id", None), "value": getattr(i, "value", None)}
             for task in (getattr(state, "tasks", ()) or ())
@@ -346,27 +394,33 @@ async def search_threads(body: dict[str, Any] | None = None, request: Request = 
     thread 应改成 SQL 直查。
     """
     body = body or {}
-    # F11 守护:limit 必须 > 0,saver.alist(limit=0) 在某些实现里会抛 / 返回不可序列化对象。
-    raw_limit = body.get("limit")
-    limit = int(raw_limit) if raw_limit not in (None, 0) else 100
+    # F11 守护 + 修复 fix-bug:把 0 视为合法显式输入,只有 None 才回落默认 100。
+    limit = _safe_int(body.get("limit"), default=100, field="limit")
     if limit <= 0:
         return _jsonify([])
-    offset = int(body.get("offset") or 0)
+    offset = _safe_int(body.get("offset"), default=0, field="offset")
     sort_by = body.get("sort_by") or "updated_at"
+    if sort_by not in _ALLOWED_SORT_BY:
+        # 不抛 422,优雅 fallback——客户端误传非白名单字段时回归默认排序,而不是 500。
+        sort_by = "updated_at"
     sort_order = (body.get("sort_order") or "desc").lower()
 
     saver = request.app.state.saver
-    # 拉够 (offset+limit)*10 条 checkpoint 做按 thread_id 去重的兜底,避免活跃 thread
-    # 占满 limit 导致老 thread 漏出(F4 风险)。仍然不是完美方案——根治需要 SQL DISTINCT。
-    fetch = max((offset + limit) * 10, 100)
+    # F4 mitigate:拉 (offset+limit)*10 倍 checkpoint 做按 thread_id 去重兜底,
+    # 避免活跃 thread 把 fetch 配额全占了导致老 thread 漏出。但上 cap 5000 防 OOM。
+    fetch = min(max((offset + limit) * 10, 100), 5000)
     seen: dict[str, dict[str, Any]] = {}
     async for ck in saver.alist(None, limit=fetch):
         tid = ck.config.get("configurable", {}).get("thread_id")
         if not tid or tid in seen:
             continue
-        # F2 修复:created_at 用 checkpoint.ts(LangGraph checkpoint dict 标准字段),
-        # 不是 metadata.created_at(不存在)。
-        ts = (ck.checkpoint.get("ts") if ck.checkpoint else None) if hasattr(ck.checkpoint, "get") else None
+        # F2 修复:created_at 用 checkpoint.ts(LangGraph checkpoint dict 标准字段);
+        # ck.checkpoint 是 TypedDict 即 dict,truthy 判断即可。
+        ts = ck.checkpoint.get("ts") if ck.checkpoint else None
+        # F-E1 修复:前端 useThreads.ts 依赖 thread.values.messages 取首条消息当会话标题;
+        # F16 之前的 fix 一刀切返 {} 让会话列表全退化成 "会话 <UUID>" fallback。还原
+        # channel_values——_jsonify 的 _json_default 已能用 str(o) 兜住 Send / Command 等。
+        ch = ck.checkpoint.get("channel_values", {}) if ck.checkpoint else {}
         seen[tid] = {
             "thread_id": tid,
             "created_at": ts,
@@ -374,13 +428,12 @@ async def search_threads(body: dict[str, Any] | None = None, request: Request = 
             "metadata": ck.metadata or {},
             "status": "idle",
             "config": ck.config,
-            # 不返回 values:saver 里的 channel_values 可能含 langgraph.types.Send 等
-            # 非 JSON-encodable 对象;前端不需要 search 返回 values(它会另外 GET state)。
-            "values": {},
+            "values": ch or {},
         }
     # F5 修复:支持 sort_by + sort_order + offset(Python 层做,demo 量级 OK)
     threads = list(seen.values())
-    threads.sort(key=lambda t: (t.get(sort_by) or ""), reverse=(sort_order == "desc"))
+    # sort key 强转 str 防 dict<dict / datetime<NoneType 等比较 crash
+    threads.sort(key=lambda t: str(t.get(sort_by) or ""), reverse=(sort_order == "desc"))
     return _jsonify(threads[offset:offset + limit])
 
 
@@ -418,7 +471,11 @@ async def update_thread_state(thread_id: str, body: dict[str, Any] | None = None
     elif checkpoint_id := body.get("checkpoint_id"):
         cfg["configurable"]["checkpoint_id"] = checkpoint_id
     new_cfg = await agent.aupdate_state(cfg, body.get("values") or {}, as_node=body.get("as_node"))
-    return _jsonify({"checkpoint": new_cfg.get("configurable", {}), "config": new_cfg})
+    # LangGraph SDK client.threads.updateState 期待 Pick<Config, "configurable">;
+    # 顶层必须含 "configurable" key(否则 SDK 拿不到新的 checkpoint_id 续传)。
+    # 同时只返回 _thin_checkpoint 的 4 个 key,不把 graph_id 等内部字段回流前端。
+    new_configurable = _thin_checkpoint(new_cfg.get("configurable") if new_cfg else None) or {}
+    return _jsonify({"configurable": new_configurable, "checkpoint": new_configurable})
 
 
 @app.post("/threads/{thread_id}/history")
@@ -426,8 +483,7 @@ async def thread_history(thread_id: str, body: dict[str, Any] | None = None, req
     body = body or {}
     agent = request.app.state.agent
     cfg = _build_config(thread_id)
-    raw_limit = body.get("limit")
-    limit = int(raw_limit) if raw_limit not in (None, 0) else 10
+    limit = _safe_int(body.get("limit"), default=10, field="limit")
     if limit <= 0:
         return _jsonify([])
     before = body.get("before")
@@ -478,22 +534,25 @@ async def _stream_run(
     else:
         actual_input = None
 
-    # F13 守护:stateless /runs/stream 没有 thread_id 时为本次 run 生成一个,确保 SSE
-    # metadata 事件里 thread_id 不为 null,前端能 anchor 后续 state 拉取。
-    if thread_id is None:
-        thread_id = body.get("thread_id") or str(uuid.uuid4())
+    # F13 守护:stateless /runs/stream 没有 thread_id 时为本次 run 生成一个,
+    # 但**只用于 SSE metadata event**,**不**传进 _build_config —— 避免每次 stateless
+    # run 都污染 saver(verified 2026-05: 不分流时 /threads/search 列表会被无主匿名
+    # thread 灌满)。
+    advertised_thread_id = thread_id or body.get("thread_id") or str(uuid.uuid4())
 
-    # config
+    # config:stateless 路径传 None 让 graph 跑 stateless(不持久化);persistent 路径
+    # (URL path 含 thread_id)正常用 thread_id。
     user_cfg = body.get("config") or {}
     cfg = _build_config(thread_id, extra=user_cfg)
     if checkpoint := body.get("checkpoint"):
         cfg["configurable"].update(checkpoint)
         # F6 守护:URL 路径里的 thread_id 永远胜过 body.checkpoint.thread_id
-        cfg["configurable"]["thread_id"] = thread_id
+        if thread_id:
+            cfg["configurable"]["thread_id"] = thread_id
 
     # 发 metadata event
     run_id = str(uuid.uuid4())
-    yield _sse_event("metadata", {"run_id": run_id, "thread_id": thread_id, "attempt": 1})
+    yield _sse_event("metadata", {"run_id": run_id, "thread_id": advertised_thread_id, "attempt": 1})
 
     # astream + 多 stream_mode(传 langgraph 内部名)
     try:
@@ -511,18 +570,17 @@ async def _stream_run(
             else:
                 yield _sse_event(client_names[0], chunk)
     except Exception as e:
-        # F7 守护:留 server 端 traceback,生产排错刚需(原实现只 yield error event 后吞掉)
+        # F7 守护:server 端 logger.exception 留完整 traceback 给运维;SSE error event
+        # **只回类型 + 消息**,不带 traceback——避免向客户端(可能是公网访客)泄漏
+        # 绝对路径 / 内部模块结构 / locals 中可能的敏感数据。
+        # 仅当 DEEPAGENTS_DEBUG=1 时把 traceback 也发给客户端(本地调试用)。
         logger.exception(
-            "[stream_run] failed; thread_id=%s run_id=%s", thread_id, run_id,
+            "[stream_run] failed; thread_id=%s run_id=%s", advertised_thread_id, run_id,
         )
-        yield _sse_event(
-            "error",
-            {
-                "error": type(e).__name__,
-                "message": str(e),
-                "traceback": traceback.format_exc(),
-            },
-        )
+        err_payload: dict[str, Any] = {"error": type(e).__name__, "message": str(e)}
+        if os.environ.get("DEEPAGENTS_DEBUG") == "1":
+            err_payload["traceback"] = traceback.format_exc()
+        yield _sse_event("error", err_payload)
         return
 
     yield _sse_event("end", {"run_id": run_id})
