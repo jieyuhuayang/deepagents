@@ -39,7 +39,11 @@ start)
     fi
     cd "$ROOT/backend"
     source .venv/bin/activate
+    # --n-jobs-per-worker 10: langgraph dev 默认 1(--help 写 10 是文档错误,
+    # 见 langgraph_api/cli.py:256 的 default = 1)。单 worker 槽会让长跑 run
+    # (如 deep-research)把后续所有 run 卡在 pending,前端表现为新会话永远空白。
     setsid nohup langgraph dev --host 0.0.0.0 --port ${BACKEND_PORT} --no-browser \
+        --n-jobs-per-worker 10 \
         < /dev/null > "$BACKEND_LOG" 2>&1 &
     cd "$ROOT/frontend"
     setsid nohup npm run start -- -H 0.0.0.0 -p ${FRONTEND_PORT} \
