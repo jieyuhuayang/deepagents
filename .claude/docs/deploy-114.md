@@ -58,6 +58,7 @@ ssh root@192.168.106.114 'curl -s http://127.0.0.1:12024/ok && \
 | Backend 日志 | `/root/deepagents/backend.log` |
 | Frontend 日志 | `/root/deepagents/frontend.log` |
 | Frontend 默认配置 | `/root/deepagents/frontend/.env.local`(`NEXT_PUBLIC_DEPLOYMENT_URL` + `NEXT_PUBLIC_ASSISTANT_ID`,构建期注入,免去访客手填弹窗) |
+| Backend 反代路径 | `/api/langgraph/*` → `http://127.0.0.1:12024/*`(`next.config.ts` rewrites);前端 `NEXT_PUBLIC_DEPLOYMENT_URL` 建议填 `/api/langgraph`,公网/局域网访客都同 origin 走 |
 | backend 端口 | **12024**(我们)— 刻意避开 :8000 之类的常见冲突 |
 | frontend 端口 | **13000**(我们)— `\b` 端口边界避免和 130xx 误冲 |
 | **绝不动**的端口 | **:3000 = bisheng-openfga**(memory `feedback_shared_lab_host_scope.md` 里那个"曾误杀"的服务) |
@@ -222,7 +223,7 @@ ssh root@192.168.106.114 'cd /root/deepagents/backend && \
 **修法**:
 ```bash
 ssh root@192.168.106.114 'cat > /root/deepagents/frontend/.env.local <<EOF
-NEXT_PUBLIC_DEPLOYMENT_URL=http://192.168.106.114:12024
+NEXT_PUBLIC_DEPLOYMENT_URL=/api/langgraph
 NEXT_PUBLIC_ASSISTANT_ID=research
 EOF
 cd /root/deepagents && ./deepagents.sh build && ./deepagents.sh start'
@@ -231,7 +232,8 @@ cd /root/deepagents && ./deepagents.sh build && ./deepagents.sh start'
 - `NEXT_PUBLIC_*` 是**构建期内联**到 bundle 的,改了必须重新 `next build`,不能只 restart。
 - `.env.local` 被 `.gitignore`(`.env*` 规则)忽略,不入版本库,每台部署机自己配一次即可。
 - `git stash push -u` 不动 ignored 文件(`-u` ≠ `-a`),所以 deploy 脚本里的 stash 不会把 `.env.local` 丢掉。
-- Deployment URL 必须是**浏览器视角能访问到的地址**;如果访客走公网映射(如 `110.16.193.170:50071` → `192.168.106.114:13000`),那 backend 也得有对应的公网映射,`.env.local` 里填的应该是访客视角的 backend URL,**不是** `192.168.106.114:12024`。
+- `NEXT_PUBLIC_DEPLOYMENT_URL` 填**相对路径** `/api/langgraph`:`next.config.ts` 的 rewrites 会把这个 path 反代到本机 backend。访客通过任何 origin(公网 `110.16.193.170:50071` / 局域网 `192.168.106.114:13000`)进来都能用同一份 bundle 工作,不再依赖访客视角的 backend URL。
+- 历史填法 `http://192.168.106.114:12024` 仍然兼容,但只适合所有访客都能直连内网的场景。
 
 ### 7.6 deepagents.sh 已经守好端口边界
 
