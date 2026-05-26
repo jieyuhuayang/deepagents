@@ -721,15 +721,17 @@ async def thread_runs_stream(thread_id: str, request: Request):
 async def join_run_stream(thread_id: str, run_id: str, request: Request):
     """useStream reconnectOnMount 用。
 
-    本期不实现"按 run_id 续传旧流"——直接返回一个 end 事件让客户端认为旧 run 已结束,
-    UI 会回到 idle 状态。后续若需要真正的断点续传,加 stream_resumable 持久化。
+    我们不保留 mid-flight SSE 流(没实现 stream_resumable),而是触发"从最后
+    checkpoint 续跑":LangGraph 标准语义 `agent.astream(None, config)` = resume。
+    - 中途被中断的 thread(SSE 断 / backend 重启)→ 续跑剩余 steps,客户端正常拿
+      到后续事件;
+    - 已完成的 thread → astream(None) 立即 yield end,客户端拿到 end 跟原行为一致;
+    - 不存在的 thread → graph init,但 input=None 没消息可处理,end 立即返回。
     """
-
-    async def _close_stream():
-        yield _sse_event("metadata", {"run_id": run_id, "thread_id": thread_id, "attempt": 1})
-        yield _sse_event("end", {"run_id": run_id, "note": "reconnect; resumable stream not implemented"})
-
-    return StreamingResponse(_close_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        _stream_run(request, thread_id=thread_id, body={}),
+        media_type="text/event-stream",
+    )
 
 
 @app.post("/threads/{thread_id}/runs/{run_id}/cancel")
