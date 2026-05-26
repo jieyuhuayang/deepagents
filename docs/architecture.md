@@ -31,14 +31,16 @@
 
 **故障与扩展定位**:启动错误或具体运行期现象先查 [troubleshooting.md](./troubleshooting.md);想理解"agent 实际怎么跑"看 §2.0;搞清楚某个机制能不能扩展、为什么这样设计看 §2.x;哪些代码因为基于 vendored 上游而不能动看 §3;评估"上游升级后能拆掉哪些适配"看 §4。
 
-**双轨部署模型**(自 v0.5.0,详见 `docs/features/v0.5.0/001-langgraph-up-deployment/spec.md`):
+**部署模型**(自 v0.5.0 全面改为自研 server,详见 `docs/features/v0.5.0/002-fastapi-postgres-checkpointer/`):
 
-| 场景 | CLI | 端口 | Checkpointer | 适用 |
+| 场景 | 启动命令 | 端口 | Checkpointer | DB 形态 |
 |---|---|---|---|---|
-| 本地开发 | `langgraph dev` | `:2024` | in-memory(进程重启即丢) | Macbook 上写代码、热重载、单人 demo |
-| 多人共享 / 持久化部署 | `langgraph up` | `:8123` | Postgres(docker compose 自带 container) | lab host (192.168.106.114) 等需要重启后保留 thread state 的场景 |
+| 本地 Macbook | `uvicorn server:app --port 2024` | `:2024` | `AsyncSqliteSaver` | `backend/local.db`(单文件,零 docker) |
+| lab host (192.168.106.114) | `./deepagents.sh start`(内部 `uvicorn server:app --port 12024`) | `:12024` | `AsyncPostgresSaver` | 独立 `deepagents-postgres` docker container + volume `deepagents_pgdata` |
 
-两种模式下 `backend/agent.py` 代码**完全一致**——`create_deep_agent` 不传 `checkpointer=`,CLI/runtime 都会自动接管。前端通过 `NEXT_PUBLIC_*` 环境变量切换 Deployment URL(见 commit `93cb122` + `6155088`)。
+两套通过 `DATABASE_URL` env 切换,`backend/server.py` 的 lifespan 自动路由 saver 类型。`backend/agent.py` 提供 `build_agent(checkpointer)` factory,由 server 启动时显式传入(强约束 §3 修订)。前端通过 `NEXT_PUBLIC_*` 环境变量切 Deployment URL(commit `93cb122` + `6155088`)。
+
+> **历史**:v0.5.0 草案曾计划用 `langgraph up`(LangGraph Platform)做持久化部署,实施时发现这是 **LangChain 公司的商业产品**——`langchain/langgraph-api` 镜像启动时强制 LangSmith Plus key 或 Cloud license 验证;且 lab host docker bridge HTTPS 出口被防火墙挡,双重阻塞。撤回方案详见 [`docs/features/v0.5.0/001-langgraph-up-deployment/`](../features/v0.5.0/001-langgraph-up-deployment/)(ABANDONED ADR)。`langgraph` 核心库 + `langgraph-checkpoint-{postgres,sqlite}` 是 OSS(Apache),自托管完全免费——这就是 002 走的路径。`langgraph dev`(本地 quick smoke)仍可用,但 backend 默认入口换成 `uvicorn server:app`。
 
 ## 2. 运行机制
 
@@ -151,7 +153,11 @@ class GenerativeUIMiddleware(AgentMiddleware[GenerativeUIState, Any, Any]):
 
 **扩展边界**:想加更多 state 字段(如 `metrics`、`citations`),继续往 middleware 的 `state_schema` 里加,不要去改 deepagents 源码。
 
-**另一个状态层约束**:`langgraph dev`(本地开发,inmem)和 `langgraph up`(lab host 部署,Postgres)**都**自动管 checkpointer,用户在 `create_deep_agent` 里**任一模式下都不要再传** `MemorySaver` 或 `checkpointer=...`,传了启动失败。两者的本质差异仅在底层存储(inmem vs Postgres),业务代码层完全一致;何时该用哪种、双轨切换怎么操作详见上文 §1 末尾"双轨部署模型"表 + `docs/features/v0.5.0/001-langgraph-up-deployment/spec.md`。
+**另一个状态层约束(随启动模式而变)**:
+- **CLI 模式** (`langgraph dev` quick smoke):框架自动管 inmem checkpointer,`create_deep_agent` 里**不要**再传 `checkpointer=`,传了启动失败。
+- **自研 server 模式** (`backend/server.py` + `uvicorn`,自 v0.5.0 默认): **必须**显式传 `checkpointer=AsyncSqliteSaver(...) / AsyncPostgresSaver(...)`,由 server lifespan 根据 `DATABASE_URL` env 实例化注入。`backend/agent.py` 暴露 `build_agent(checkpointer)` factory + module-level `agent = build_agent(None)` fallback(仅供 `langgraph dev` 加载 `langgraph.json:graphs.research`,不参与正式部署)。
+
+何时该用哪种、切换怎么操作详见 §1 末尾部署模型表 + `docs/features/v0.5.0/002-fastapi-postgres-checkpointer/spec.md`。
 
 ### 2.3 人在回路:当前 dormant + 重启路径
 
@@ -319,6 +325,8 @@ useEffect(() => {
 ```
 
 **可删条件**:删 hack,跑一次 HITL approve;如果不再 422,说明 SDK 与 `langgraph-api` 后端已同步,可以删了。
+
+**自研 server (002) 兼容性补充**:v0.5.0 起 backend 默认走 `backend/server.py` 而非 `langgraph-cli[inmem]`,但 server 显式实现 "stream_mode 数组含 `"tools"` 时返回 HTTP 422" 的 schema 兼容(见 `server.py` 的 `_validate_stream_mode`),**仍守护这个 hack 的存在意义**。判定可删条件相应改为:"升级 SDK 让它不再 auto-append `tools` 后,本 hack 可拆;同时 server.py 那段 422 校验可以一起改为'忽略 tools 不报错'"。本期 002 verification 含**破坏性回归**(临时注释 monkey-patch 跑一次确认 server 仍 422)守护住这条契约。
 
 ## 4. 演进路径
 

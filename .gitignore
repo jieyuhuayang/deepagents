@@ -40,3 +40,8 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Local SQLite checkpointer (002 feature, AsyncSqliteSaver runtime data)
+backend/local.db
+backend/local.db-shm
+backend/local.db-wal

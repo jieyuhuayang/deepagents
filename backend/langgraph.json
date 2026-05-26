@@ -3,9 +3,5 @@
   "graphs": {
     "research": "./agent.py:agent"
   },
-  "env": ".env",
-  "pip_config_file": "./pip.conf",
-  "dockerfile_lines": [
-    "ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple/"
-  ]
+  "env": ".env"
 }

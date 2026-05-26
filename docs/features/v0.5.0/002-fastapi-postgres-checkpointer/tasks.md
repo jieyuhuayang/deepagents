@@ -48,7 +48,7 @@ T1 (frontend endpoint 审计 + agent.py 重构 factory)
 
 ### T2 — `backend/server.py` 实现 + 依赖更新
 
-- **状态**:☐ 待开始 / ☐ 进行中 / ☐ 已完成
+- **状态**:☐ 待开始 / ☐ 进行中 / ☑ 已完成(2026-05-26;server.py 516 行,11 个 endpoints + SSE + lifespan,本地 SQLite smoke 全部通过;**AC-2 核心已 curl 验证**:server 重启前后同一 thread n_messages=2 + 同一 checkpoint_id;stream_mode "tools" → HTTP 422 守护 OK;完整浏览器 demo 留 T6 终验)
 - **文件**:`backend/server.py`(新建);`backend/pyproject.toml`(修改)
 - **逻辑**:
   1. **`pyproject.toml`**:
@@ -73,7 +73,7 @@ T1 (frontend endpoint 审计 + agent.py 重构 factory)
 
 ### T3 — 配置 / 启动脚本回滚 + 切换到 uvicorn
 
-- **状态**:☐ 待开始 / ☐ 进行中 / ☐ 已完成
+- **状态**:☐ 待开始 / ☐ 进行中 / ☑ 已完成(2026-05-26;pip.conf 已 git rm;langgraph.json 精简到 3 字段;.env.example 改为 DATABASE_URL 默认 SQLite + lab host Postgres 注释;deepagents.sh backend 启动 `uvicorn server:app` + stop_all 兜底 pkill 兼容老 langgraph dev 进程)
 - **文件**:`backend/.env.example`(修改)、`backend/langgraph.json`(修改)、`backend/pip.conf`(删除)、`deepagents.sh`(修改)
 - **逻辑**:
   1. **`backend/pip.conf`** 删除(`git rm backend/pip.conf`,001 加的,不再需要)
@@ -100,7 +100,7 @@ T1 (frontend endpoint 审计 + agent.py 重构 factory)
 
 ### T4 — 文档同步(CLAUDE.md + architecture.md + troubleshooting.md + README.md)
 
-- **状态**:☐ 待开始 / ☐ 进行中 / ☐ 已完成
+- **状态**:☐ 待开始 / ☐ 进行中 / ☑ 已完成(2026-05-26;CLAUDE.md §强约束 #3 拆为 CLI / 自研 server 两段 + §仓库总览 + §常用命令更新;architecture.md §1 部署模型表重写 + §2.2 + §3.3 补 002 兼容性;troubleshooting.md §1.1 拆两个 mode + §1.5 重写指向 002;README.md §2 启动 + §5 lab host 整段重写;**AC-6/AC-7 grep 全部命中**)
 - **文件**:`CLAUDE.md`、`docs/architecture.md`、`docs/troubleshooting.md`、`README.md`
 - **逻辑**:
   1. **`CLAUDE.md`**:

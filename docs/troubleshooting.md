@@ -4,13 +4,16 @@
 
 ## 1. 启动问题
 
-### 1.1 langgraph dev / langgraph up 启动报 "checkpointer not necessary"
+### 1.1 启动 checkpointer 相关报错(两种 mode 行为相反)
 
-**现象**:后端启动失败,报错提示不需要 checkpointer。
+**自 v0.5.0 起,backend 的启动 checkpointer 期望取决于启动模式**(见 `docs/architecture.md §2.2`):
 
-**原因**:**`langgraph dev`(本地,inmem)和 `langgraph up`(lab host,Postgres)都自动管 checkpointer**——用户不能再传 `MemorySaver` 或 `checkpointer=...`。详见 `docs/architecture.md §2.2` 末尾。
+| 模式 | 报错 | 修法 |
+|---|---|---|
+| `langgraph dev`(quick smoke) | `"checkpointer not necessary"` / 启动失败 | 不要在 `create_deep_agent` 里传 `checkpointer=`。`langgraph dev` 自动管 inmem。本项目的 module-level `agent = build_agent(None)` fallback 走这条路,**不要把 None 改成具体 saver**。 |
+| `uvicorn server:app`(默认) | 启动报缺 saver / lifespan 报错 | `backend/server.py` lifespan 必须实例化 `AsyncSqliteSaver` / `AsyncPostgresSaver` 并通过 `build_agent(saver)` 注入。检查 `DATABASE_URL` env 是否有效。 |
 
-**修法**:删 `agent.py` 里 `MemorySaver()` 实例化和 `create_deep_agent(..., checkpointer=...)` 参数。
+历史:v0.5.0 之前只有 `langgraph dev` 一种 mode,报错只来自"传了 checkpointer"。现在自研 server 引入了"反过来"——**必须传**——所以两条修法都要看清启动方式。
 
 ### 1.2 启动报 "Using SOCKS proxy, but socksio not installed"
 
@@ -50,27 +53,29 @@ npm install --registry=https://registry.npmmirror.com --legacy-peer-deps
 
 **现象**:lab host (例如 192.168.106.114) 上 backend 进程重启后,回到旧 thread,浏览器**还能看到**澄清卡 + todo list (5/5 完成等),但 messages 中间过程全部缺失;按 F5 刷新后整个 thread 变空白。
 
-**原因**:lab host 部署如果用的是 `langgraph dev`,checkpointer 是 in-memory,进程重启**立即清空所有 thread state**。浏览器看到的"半截画面"来自 React 内存里**断线前的 SSE 快照**(不是真实持久化的 state)——`useChat.ts:225-230` 把 todos / files / ui 从 `stream.values.*` 取(values 模式 snapshot 累积),把 messages 从 `stream.messages` 取(messages-tuple 模式独立累积),两条流在 backend 重启 + SSE 重连时"恢复完整度"不同步,所以才出现一半完整一半残缺的视觉错觉。
+**原因**:旧版 lab host 用 `langgraph dev`,checkpointer 是 in-memory,进程重启**立即清空所有 thread state**。浏览器看到的"半截画面"来自 React 内存里**断线前的 SSE 快照**(不是真实持久化的 state)——`useChat.ts:225-230` 把 todos / files / ui 从 `stream.values.*` 取(values 模式 snapshot 累积),把 messages 从 `stream.messages` 取(messages-tuple 模式独立累积),两条流在 backend 重启 + SSE 重连时"恢复完整度"不同步,所以才出现一半完整一半残缺的视觉错觉。
 
 **诊断三步**:
 
 ```bash
 # 1. backend state 真实情况(应该几乎全空)
 curl -s http://<lab-host>:<port>/threads/<thread-id>/state \
-  | jq '{n_messages: (.values.messages|length), n_todos: (.values.todos|length), n_ui: (.values.ui|length)}'
+  | jq '{n_messages: (.values.messages|length), n_todos: (.values.todos|length)}'
 
 # 2. 浏览器 F5 刷新,如果"半截画面"瞬间变空白,印证浏览器内存撑场面
 # 3. backend 进程启动时间
-ssh root@<lab-host> 'ps -o lstart= -p $(pgrep -f langgraph)'
+ssh root@<lab-host> 'ps -o lstart= -p $(pgrep -f "uvicorn server:app\|langgraph dev")'
 # 大概率晚于 thread 创建时间
 ```
 
-**修法**:lab host 部署改用 `langgraph up`(切到 Postgres 持久化),详见:
+**修法**(v0.5.0 起):lab host 部署改用 **`backend/server.py`(uvicorn) + 独立 Postgres docker container**(`AsyncPostgresSaver` 持久化),具体见:
 
-- `README.md` "lab host 部署(`langgraph up`)" 小节
-- `docs/features/v0.5.0/001-langgraph-up-deployment/spec.md`
+- `README.md` §5 "lab host 部署(`uvicorn server:app` + 独立 Postgres docker)" 小节
+- `docs/features/v0.5.0/002-fastapi-postgres-checkpointer/spec.md`
 
-本地 demo (`langgraph dev`) 接受 inmem 限制——重启就重来即可,不是 bug 是定位。背景与根因诊断详见 `~/.claude/plans/image-1-http-192-168-106-114-13000-assi-fluffy-honey.md`。
+本地 demo 自 v0.5.0 起也走 `uvicorn server:app` + `AsyncSqliteSaver`(`backend/local.db` 单文件),进程重启同样不丢数据。
+
+**历史方案对比**(v0.5.0 草案撤回):曾计划切到 `langgraph up`(LangGraph Platform 商业产品),但 license 要求 + lab host 网络限制阻塞,详见 [`docs/features/v0.5.0/001-langgraph-up-deployment/`](../features/v0.5.0/001-langgraph-up-deployment/)(ABANDONED ADR)。背景与根因诊断详见 `~/.claude/plans/image-1-http-192-168-106-114-13000-assi-fluffy-honey.md`。
 
 ## 2. 模型行为
 

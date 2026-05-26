@@ -70,8 +70,12 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
-langgraph dev      # → http://127.0.0.1:2024
+# 自 v0.5.0:自研 FastAPI server + AsyncSqliteSaver(本地默认 SQLite,无 docker 依赖)
+uvicorn server:app --port 2024 --reload      # → http://127.0.0.1:2024
+# 本地 quick smoke(无持久化)也可用:langgraph dev → :2024(模块层 `agent` fallback)
 ```
+
+启动后 `backend/local.db` 自动创建。这是 SQLite 持久化文件——后端进程重启不会丢 thread state(对比 `langgraph dev` 的 in-memory)。
 
 ### 3. 装前端依赖并启动（终端 B）
 
@@ -91,75 +95,78 @@ yarn dev           # → http://localhost:3000
 
 保存。
 
-### 5. lab host 部署(`langgraph up`,Postgres 持久化)
+### 5. lab host 部署(`uvicorn server:app` + 独立 Postgres docker)
 
-> **仅 lab host (例如 192.168.106.114) 用。本地 Macbook 仍走 `langgraph dev` (上面 §2),不要在本地起 `langgraph up`,会拉镜像 + 占资源。** 详见 `docs/features/v0.5.0/001-langgraph-up-deployment/spec.md`。
+> **仅 lab host (例如 192.168.106.114) 用。本地 Macbook 走 `uvicorn server:app + SQLite`(上面 §2,零 docker 依赖)。** 详见 `docs/features/v0.5.0/002-fastapi-postgres-checkpointer/spec.md`。
 
-**为什么不在 lab host 上继续用 `langgraph dev`?** `langgraph dev` 用 in-memory checkpointer,进程重启就丢全部 thread state——多人共享 / 服务可能被重启的场景下不可接受。`langgraph up` 用 docker compose 起 langgraph-api + Postgres + Redis 三个 container,Postgres 持久化 thread state,重启后状态完整保留。背景见 `docs/troubleshooting.md §1.5`。
+**为什么 lab host 用 Postgres 而非 SQLite?** SQLite 文件单进程写入足够本地 demo,但多 worker / 远程访客 / 服务可能被重启的场景下,Postgres 独立 docker container 更稳。本地 + lab host **一套代码两套配置**,只通过 `DATABASE_URL` env 区分。背景见 `docs/troubleshooting.md §1.5`。
+
+> **撤回历史**:v0.5.0 草案曾计划用 LangGraph Platform 的 `langgraph up`(docker compose 起 langgraph-api + postgres + redis 三个 container),但发现 `langchain/langgraph-api` 是商业产品需 LangSmith Plus 或 Cloud license,且 lab host docker bridge HTTPS 出口被防火墙挡。详见 [`docs/features/v0.5.0/001-langgraph-up-deployment/`](docs/features/v0.5.0/001-langgraph-up-deployment/)(ABANDONED ADR)。
 
 #### 5.1 前置
 
-- lab host 上已装 Docker (≥ 24) + Docker Compose v2
-- lab host 能拉 `langchain/langgraph-api` / `postgres` / `redis` 镜像(国内网络可能要先配 registry mirror)
-- 已有的 lab host 部署用 `./deepagents.sh start` 跑 `langgraph dev :12024`;切到 `langgraph up` 前必须先 `./deepagents.sh stop` 释放端口
+- lab host 上已装 Docker(≥ 24) + Docker Compose v2(用于跑 Postgres container)
+- `postgres:16-alpine` 镜像已在 lab host 缓存(没缓存的话 `docker pull` 即可,通常 docker hub 走 lab host 内的 registry mirror)
+- 已有 lab host 部署用 `./deepagents.sh start`;v0.5.0 起 backend 启动命令已改成 `uvicorn server:app`(`deepagents.sh` 已同步)
 
-#### 5.2 启动
+#### 5.2 起独立 Postgres docker container(一次性)
 
 ```bash
 ssh root@192.168.106.114
-cd /root/deepagents
 
-# 1. 停掉旧的 langgraph dev + next-server(deepagents.sh 不动,仅适用于 dev 模式)
-./deepagents.sh stop
+PGPWD=$(openssl rand -hex 16)
+docker run -d \
+  --name deepagents-postgres \
+  --restart unless-stopped \
+  -p 5433:5432 \
+  -e POSTGRES_PASSWORD="$PGPWD" \
+  -v deepagents_pgdata:/var/lib/postgresql/data \
+  postgres:16-alpine
 
-# 2. 切到 backend 目录,启动 langgraph up
-cd backend
-langgraph up                       # 默认 :8123;首次拉镜像可能慢
-# 或者 override 端口(端口冲突时):
-# langgraph up --port 8123         # 端口可改
-
-# 3. 起前端(prod build,见 memory feedback-next-prod-for-lan-deploy)
-cd ../frontend
-npm run build                      # 改完代码必跑
-NEXT_PUBLIC_LANGGRAPH_API_URL=http://192.168.106.114:8123 \
-NEXT_PUBLIC_ASSISTANT_ID=research \
-  npm run start -- -H 0.0.0.0 -p 13000
+# 把生成的密码写到 .env(后面 backend 启动时会读)
+echo "DATABASE_URL=postgresql+asyncpg://postgres:${PGPWD}@127.0.0.1:5433/postgres" \
+  >> /root/deepagents/backend/.env
 ```
 
-#### 5.3 健康检查
+#### 5.3 切到自研 server + 起服务
 
 ```bash
-docker ps --format 'table {{.Names}}\t{{.Status}}'   # 应看到 langgraph-api / langgraph-postgres-* / langgraph-redis-* 全部 (healthy)
-curl http://192.168.106.114:8123/ok                  # 应返回 {"ok":true}
+cd /root/deepagents
+./deepagents.sh stop                                         # 停旧 backend + frontend
+git pull origin feat/v0.5.0/001-langgraph-up-deployment      # 含 001 abandoned + 002 实施
+./deepagents.sh start                                        # 内部跑 uvicorn server:app --port 12024
 ```
 
-#### 5.4 端口配置(冲突时 override)
+#### 5.4 健康检查
 
-lab host 上已有 redis (host 装的,`:6379`)。`langgraph up` 自带 redis 默认也是 `:6379`,**冲突,必须 override**。在 `backend/.env` 里:
-
-```
-REDIS_PORT=6380       # 自带 Redis 改用 6380(默认 6379 与 host 上已有 redis 冲突)
-POSTGRES_PORT=5433    # 自带 Postgres 改用 5433(如 host 已有 Postgres 在 5432)
-LANGGRAPH_PORT=8123   # 默认 8123,与 host 上其他服务都不冲突
+```bash
+docker ps --filter "name=deepagents-postgres" --format 'table {{.Names}}\t{{.Status}}'   # 应 Up healthy
+curl http://192.168.106.114:12024/ok                                                     # 应 {"ok":true}
+./deepagents.sh status                                                                   # 应看到 uvicorn + next-server 端口
 ```
 
-实际可用占位见 `backend/.env.example` 末尾段。
+#### 5.5 端口配置(冲突时 override)
 
-#### 5.5 数据持久化
+lab host 上已有原生 redis `:6379`,但 002 方案**不用 Redis**(没有 langgraph-api / langgraph-redis container),所以无冲突。
 
-`langgraph up` 默认用 docker volume 存 Postgres 数据,`docker compose down` **不**清数据,**只有** `docker compose down -v` 才清。重启 backend 用 `docker restart langgraph-api`,不会丢 thread。
+Postgres 用 `:5433` 对外(避让 host 可能已有的 `:5432`)。如要改,改 `docker run -p` 端口 + `.env` 的 `DATABASE_URL` 端口。
 
-#### 5.6 与本地 `langgraph dev` 的差异
+#### 5.6 数据持久化
 
-| 项 | 本地 (`langgraph dev`) | lab host (`langgraph up`) |
+Postgres 数据存在 docker volume `deepagents_pgdata`,`docker stop deepagents-postgres` **不**清数据,**只有** `docker volume rm deepagents_pgdata` 才清。重启 backend 用 `./deepagents.sh stop && start`,不会动 Postgres container。
+
+#### 5.7 与本地 SQLite 的差异
+
+| 项 | 本地 Macbook | lab host |
 |---|---|---|
-| Checkpointer | in-memory | Postgres (docker volume 持久化) |
-| 后端端口 | `:2024` | `:8123` |
-| 启动方式 | `langgraph dev` 命令直接跑 | docker compose 起 3 个 container |
-| 进程重启影响 | thread state 全丢 | thread state 保留 |
-| 适用 | 本机开发、单人 demo | 多人共享、可被重启的环境 |
+| Checkpointer | `AsyncSqliteSaver` (`backend/local.db`) | `AsyncPostgresSaver`(独立 docker container) |
+| 后端启动 | `uvicorn server:app --port 2024 --reload` | `./deepagents.sh start`(内部 uvicorn --port 12024) |
+| 后端端口 | `:2024` | `:12024` |
+| docker 依赖 | 无 | 仅 `deepagents-postgres` container |
+| 进程重启影响 | thread state 保留(SQLite 文件持久化) | thread state 保留(Postgres volume 持久化) |
+| 适用 | 本机开发、单人 demo | 多人共享 / 远程访客 / 服务可被重启的环境 |
 
-详细对比 + 决策见 `docs/architecture.md §1` 末尾"双轨部署模型"表 + `docs/features/v0.5.0/001-langgraph-up-deployment/`。
+详细对比 + 决策见 `docs/architecture.md §1` 末尾"部署模型"表 + `docs/features/v0.5.0/002-fastapi-postgres-checkpointer/`。
 
 ---
 
