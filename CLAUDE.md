@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 仓库总览
 
 Deep Research agent 本地 demo。Monorepo:
-- `backend/` — Python,`deepagents` + DashScope OpenAI-compatible LLM,跑在 `langgraph dev` 上(端口 2024)。
+- `backend/` — Python,`deepagents` + DashScope OpenAI-compatible LLM,通过 `backend/server.py` 启动 uvicorn(端口 2024 本地 / 12024 lab host),显式 `AsyncPostgresSaver` / `AsyncSqliteSaver` 持久化(由 `DATABASE_URL` env 选择)。本地 quick smoke 仍可用 `langgraph dev`。
 - `frontend/` — `langchain-ai/deep-agents-ui` 的 **vendored 副本**(Next.js 16 + React 19,端口 3000),含 4 处本地 patch。
 
 详细架构、决策、跨上游适配:**`docs/architecture.md`** — 改动前先读对应章节,不要从代码反推。运行期具体故障与模型行为偏差:**`docs/troubleshooting.md`**。
@@ -13,8 +13,9 @@ Deep Research agent 本地 demo。Monorepo:
 ## 常用命令
 
 ```bash
-# 后端(终端 A)
-cd backend && source .venv/bin/activate && langgraph dev    # → :2024
+# 后端(终端 A) — 自研 FastAPI server,DATABASE_URL 缺省 SQLite (backend/local.db)
+cd backend && source .venv/bin/activate && uvicorn server:app --port 2024 --reload    # → :2024
+# 本地 quick smoke(无持久化)也可用 langgraph dev(graph 通过 module-level `agent` fallback 加载)
 
 # 前端(终端 B)
 cd frontend && yarn dev                                     # → :3000
@@ -43,7 +44,11 @@ yarn build     # next build
 
 - **不要删 `GenerativeUIMiddleware`**。`deepagents._DeepAgentState` 没有 `ui` 字段,删了 `push_ui_message` 会被默默丢弃。升级 `deepagents` 时先验证 `_DeepAgentState` 是否补了 `ui`,确认后才能删。详见 §2.2。
 - **LLM provider 锁定 `ChatOpenAI` + DashScope base_url**。不要换 `init_chat_model("anthropic:...")` 或 LangChain provider registry——它们没法指向 DashScope。详见 §2.1。
-- **不要在 `create_deep_agent` 里传 `checkpointer` / `MemorySaver`**。`langgraph dev` 自动管 checkpointer,传了启动失败。
+- **不要传 `checkpointer` / `MemorySaver` 给 `create_deep_agent` —— 但具体取决于启动模式**:
+  - **CLI 模式**(`langgraph dev`,本项目自 v0.5.0 起不再默认使用,保留作为本地 quick smoke 工具):框架自动管 inmem checkpointer,传了启动失败
+  - **自研 server 模式**(`backend/server.py` + `uvicorn`,本项目默认):**必须显式传** `checkpointer=AsyncPostgresSaver(...) / AsyncSqliteSaver(...)`,由 server lifespan 根据 `DATABASE_URL` env 实例化注入。详见 `docs/architecture.md §2.2` + `docs/features/v0.5.0/002-fastapi-postgres-checkpointer/spec.md`。
+
+  历史:`langgraph up`(LangGraph Platform 商业产品,需 LangSmith Plus 或 Cloud license)在 lab host 上跑不通,见 `docs/features/v0.5.0/001-langgraph-up-deployment/`(ABANDONED ADR)。
 - **不要把 `streaming=True` 改回 `False`**(`agent.py:24`)。曾有"DashScope tools+stream 互斥"的判断已证伪,现代模型支持。详见 §2.1 历史踩坑提示。
 - **前端是 vendored 副本,有 4-6 处本地 patch**。`cd frontend && git pull` 前必须 `git diff > /tmp/patches.diff` 留底再 `git apply` 回去。详见 §3.1。
 - **HITL 批量审批是"全 approve / 全 reject"语义**。`broadcastResumeInterrupt` 把单决策广播到 N 个 action_requests,**无法对单个 action 做不同决策**。要细粒度要重写 `ToolApprovalInterrupt`。语义说明见 §2.3,实现细节见 §3.2。

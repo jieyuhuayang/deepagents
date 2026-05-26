@@ -11,6 +11,9 @@ FRONTEND_PORT=13000
 
 # 只杀我们自己启的进程，绝不动 :3000 (bisheng-openfga) 等其他业务
 stop_all() {
+    # 自研 FastAPI server (002 起):uvicorn server:app。
+    # 老的 langgraph dev 模式保留兜底 pkill,以防旧进程还在跑(本地 dev quick smoke 用)。
+    pkill -f "uvicorn server:app --host 0.0.0.0 --port ${BACKEND_PORT}" 2>/dev/null
     pkill -f "langgraph dev --host 0.0.0.0 --port ${BACKEND_PORT}"     2>/dev/null
     pkill -f "next-server.*${FRONTEND_PORT}"                            2>/dev/null
     pkill -f "next start.*-p ${FRONTEND_PORT}"                          2>/dev/null
@@ -38,12 +41,10 @@ start)
         echo "frontend/.next 不存在,先跑 $0 build"; exit 1
     fi
     cd "$ROOT/backend"
-    source .venv/bin/activate
-    # --n-jobs-per-worker 10: langgraph dev 默认 1(--help 写 10 是文档错误,
-    # 见 langgraph_api/cli.py:256 的 default = 1)。单 worker 槽会让长跑 run
-    # (如 deep-research)把后续所有 run 卡在 pending,前端表现为新会话永远空白。
-    setsid nohup langgraph dev --host 0.0.0.0 --port ${BACKEND_PORT} --no-browser \
-        --n-jobs-per-worker 10 \
+    # 自研 FastAPI server(002):由 DATABASE_URL env 决定 saver(SQLite 本地 /
+    # Postgres lab host)。uvicorn 默认 worker 配置足够 demo 量级,不再需要
+    # langgraph dev 的 --n-jobs-per-worker。
+    setsid nohup .venv/bin/uvicorn server:app --host 0.0.0.0 --port ${BACKEND_PORT} \
         < /dev/null > "$BACKEND_LOG" 2>&1 &
     cd "$ROOT/frontend"
     setsid nohup npm run start -- -H 0.0.0.0 -p ${FRONTEND_PORT} \
@@ -61,7 +62,7 @@ stop)
     ;;
 status)
     echo "=== procs ==="
-    ps -ef | grep -E "langgraph dev|next-server|next start|next dev" | grep -v grep || echo "(no procs)"
+    ps -ef | grep -E "uvicorn server:app|langgraph dev|next-server|next start|next dev" | grep -v grep || echo "(no procs)"
     echo "=== ports ==="
     ss -ltn 2>/dev/null | grep -E ":(${BACKEND_PORT}|${FRONTEND_PORT})\b" || echo "(no listeners on ${BACKEND_PORT}/${FRONTEND_PORT})"
     ;;

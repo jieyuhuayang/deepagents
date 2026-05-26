@@ -11,6 +11,20 @@ dependencies = [
     "tavily-python>=0.5",
     "httpx>=0.27",
     "langgraph>=1.0",
+    # 自研 FastAPI server (002 T2) + 持久化 saver
+    # 详见 docs/features/v0.5.0/002-fastapi-postgres-checkpointer/spec.md
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "langgraph-checkpoint-postgres>=3.1",
+    "langgraph-checkpoint-sqlite>=2.1",
+    # psycopg 3.x 默认是 pure Python,要么需要系统 libpq,要么需要 psycopg[binary] extra
+    # 显式声明 binary wheel 让 pip 自动装(本地 / lab host / docker 内都 work)。
+    # AsyncPostgresSaver 内部用 psycopg(不是 asyncpg)——SQLAlchemy URL `postgresql+asyncpg://`
+    # 仅作客户端配置约定,server.py 的 _parse_db_url 会 strip 后缀。
+    "psycopg[binary]>=3.0",
+    "aiosqlite>=0.20",
+    # langgraph-cli[inmem] 仅在 langgraph dev quick smoke 时需要,
+    # 自研 server (server.py) 不依赖。保留为开发期辅助工具,改成 optional 也行。
     "langgraph-cli[inmem]>=0.1.50",
     "python-dotenv>=1.0",
     "pypandoc-binary>=1.13",
