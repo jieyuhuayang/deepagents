@@ -188,6 +188,10 @@ def _validate_stream_mode(stream_mode: Any) -> list[tuple[str, str]]:
     if stream_mode is None:
         return [("values", "values")]
     raw = stream_mode if isinstance(stream_mode, list) else [stream_mode]
+    # 空 list 视同未传(否则后续 lg_names[0] 在空 list 上 IndexError,会经
+    # StreamingResponse 变成 SSE error event 而非 422,client 困惑)。
+    if not raw:
+        return [("values", "values")]
     # 元素类型守护:非 str 元素(dict/list 等非 hashable)在 dict.fromkeys 会 TypeError → 500;
     # 此处直接 422 with 友好 detail。
     if not all(isinstance(m, str) for m in raw):
@@ -265,10 +269,18 @@ def _thin_checkpoint(configurable: dict[str, Any] | None) -> dict[str, Any] | No
 
     若 configurable 是空/不含 _CHECKPOINT_KEYS 任一(例如只有 graph_id),返回 None
     而非 {} —— 让前端 `if (state.checkpoint)` 守护真正生效。
+
+    同时剔除 None 值字段:Pregel 兜底 snapshot 的 config 可能含 {thread_id: None},
+    返回 {thread_id: None} 会让前端守护通过但解引用 .thread_id 是 null,SDK 构造
+    `/threads/null/...` URL 或写脏数据。只保留有意义的 key。
     """
     if not configurable:
         return None
-    result = {k: configurable[k] for k in _CHECKPOINT_KEYS if k in configurable}
+    result = {
+        k: configurable[k]
+        for k in _CHECKPOINT_KEYS
+        if k in configurable and configurable[k] is not None
+    }
     return result or None
 
 
@@ -478,16 +490,16 @@ async def search_threads(body: dict[str, Any] | None = None, request: Request = 
             "config": {"configurable": _thin_checkpoint(ck.config.get("configurable")) or {}},
             "values": values_slim,
         }
-    # F5 + 排序:无 ts 的 thread(新建未跑过)应排到队首(把它们当最新创建),而不是
-    # 因 fallback "" 字符串排到末尾被 offset/limit 切走。
+    # F5 + 排序:无 ts 的 thread(新建未跑过)在 desc(最常用)模式下排队首
+    # (当作最新);asc 模式下排队尾(列表底)。简化:None 永远给 primary=1,
+    # has-val 给 primary=0,靠 reverse 切换头尾位置——
+    #   desc(reverse=True):(1,"") 排首,(0, ts) 在后 → None first
+    #   asc (reverse=False):(0, ts) 排首,(1,"") 在后 → None last
     threads = list(seen.values())
 
     def _sort_key(t: dict[str, Any]) -> tuple[int, str]:
         v = t.get(sort_by)
-        # primary key:无值的 thread 在 desc(最常用)排序下应在最前(认为最新);
-        # asc 排序时无值的反而应在最后。
-        missing_rank = 0 if (sort_order == "desc") else 1
-        return (missing_rank if v is None else (1 - missing_rank), str(v or ""))
+        return (1 if v is None else 0, str(v or ""))
 
     threads.sort(key=_sort_key, reverse=(sort_order == "desc"))
     return _jsonify(threads[offset:offset + limit])
@@ -544,14 +556,17 @@ async def thread_history(thread_id: str, body: dict[str, Any] | None = None, req
     limit = _safe_int(body.get("limit"), default=10, field="limit")
     if limit <= 0:
         return _jsonify([])
-    offset_raw = body.get("offset")
-    if offset_raw is not None:
-        offset = _safe_int(offset_raw, default=0, field="offset")
-        if offset < 0:
-            raise HTTPException(
-                status_code=422,
-                detail={"msg": "offset must be >= 0", "got": offset},
-            )
+    # 注:`offset` 字段不支持。LangGraph aget_state_history API 用 `before` 游标分页,
+    # 没有 offset 参数;langgraph-sdk getHistory 也不传 offset。客户端误传时显式 422
+    # 让其切换到 `before` 游标,避免之前"校验通过但被静默忽略"的假翻页。
+    if body.get("offset") is not None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "msg": "thread_history uses 'before' cursor, not offset",
+                "got_offset": body.get("offset"),
+            },
+        )
     before = body.get("before")
     if isinstance(before, dict):
         before_cfg = {"configurable": before}
@@ -606,16 +621,20 @@ async def _stream_run(
     # URL 锚定不存在的 thread,(b) body.config.configurable.thread_id 可注入到现有
     # thread(verified 2026-05-27 跨 thread 写入)。
     #
-    # 安全:stateless 路径下,客户端**不能**通过 body 指定 thread_id;若想复用已有
-    # thread,应该用 /threads/{id}/runs/stream(persistent 路径)。这里显式 strip 掉
-    # body.config.configurable.thread_id,关上跨 thread 注入门。
+    # 安全:stateless 路径下,客户端**不能**通过 body 指定 checkpoint anchor 相关任何
+    # 字段(thread_id / checkpoint_id / checkpoint_ns / checkpoint_map)。若想复用
+    # 已有 thread 或从某个 checkpoint 续传,必须用 /threads/{id}/runs/stream
+    # (persistent 路径)。这里**完整 strip _CHECKPOINT_KEYS**,关上跨 thread 注入 +
+    # cross-checkpoint-fork 漏洞。同时避免 mutate FastAPI body 引用,用 dict 重建。
     user_cfg = body.get("config") or {}
     if thread_id is None:
         thread_id = str(uuid.uuid4())
-        # strip 任何 client 提供的 thread_id 防注入
-        user_cfg_configurable = user_cfg.get("configurable") if isinstance(user_cfg, dict) else None
-        if isinstance(user_cfg_configurable, dict):
-            user_cfg_configurable.pop("thread_id", None)
+        # 整个 user_cfg.configurable 重建一份(避免 mutate body 引用 + 完整 strip
+        # _CHECKPOINT_KEYS)
+        existing_configurable = user_cfg.get("configurable") if isinstance(user_cfg, dict) else None
+        if isinstance(existing_configurable, dict):
+            cleaned = {k: v for k, v in existing_configurable.items() if k not in _CHECKPOINT_KEYS}
+            user_cfg = {**user_cfg, "configurable": cleaned}
 
     # config:thread_id 强制走 URL/mint 出来的;_build_config 末尾会 force.
     cfg = _build_config(thread_id, extra=user_cfg)
