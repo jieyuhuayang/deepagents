@@ -57,6 +57,7 @@ ssh root@192.168.106.114 'curl -s http://127.0.0.1:12024/ok && \
 | 部署脚本 | `/root/deepagents/deepagents.sh`(in-repo,跟主 branch 走) |
 | Backend 日志 | `/root/deepagents/backend.log` |
 | Frontend 日志 | `/root/deepagents/frontend.log` |
+| Frontend 默认配置 | `/root/deepagents/frontend/.env.local`(`NEXT_PUBLIC_DEPLOYMENT_URL` + `NEXT_PUBLIC_ASSISTANT_ID`,构建期注入,免去访客手填弹窗) |
 | backend 端口 | **12024**(我们)— 刻意避开 :8000 之类的常见冲突 |
 | frontend 端口 | **13000**(我们)— `\b` 端口边界避免和 130xx 误冲 |
 | **绝不动**的端口 | **:3000 = bisheng-openfga**(memory `feedback_shared_lab_host_scope.md` 里那个"曾误杀"的服务) |
@@ -214,7 +215,25 @@ ssh root@192.168.106.114 'cd /root/deepagents/backend && \
 **原因**:Next 16 turbopack 的 HMR WebSocket 跨子网 NAT 失败,React client manifest hydration 卡住。
 **修法**:114 上**必须用 prod mode**(`next build + next start`),`deepagents.sh` 已经默认这样。**不要在 114 跑 `yarn dev` / `next dev`**。代价:代码改了要 rebuild。
 
-### 7.5 deepagents.sh 已经守好端口边界
+### 7.5 frontend `.env.local` 没创建 → 访客被弹配置窗
+
+**症状**:每个用户首次打开 `http://192.168.106.114:13000/` 都弹"配置 LangGraph 部署"弹窗,要手填 Deployment URL + Assistant ID。
+**原因**:`frontend/src/lib/config.ts` 的 `getConfig()` 没在 localStorage 找到记录就触发弹窗。`NEXT_PUBLIC_*` 兜底逻辑只在 114 上配了 `.env.local` 且**重新 build** 之后才生效。
+**修法**:
+```bash
+ssh root@192.168.106.114 'cat > /root/deepagents/frontend/.env.local <<EOF
+NEXT_PUBLIC_DEPLOYMENT_URL=http://192.168.106.114:12024
+NEXT_PUBLIC_ASSISTANT_ID=research
+EOF
+cd /root/deepagents && ./deepagents.sh build && ./deepagents.sh start'
+```
+**注意**:
+- `NEXT_PUBLIC_*` 是**构建期内联**到 bundle 的,改了必须重新 `next build`,不能只 restart。
+- `.env.local` 被 `.gitignore`(`.env*` 规则)忽略,不入版本库,每台部署机自己配一次即可。
+- `git stash push -u` 不动 ignored 文件(`-u` ≠ `-a`),所以 deploy 脚本里的 stash 不会把 `.env.local` 丢掉。
+- Deployment URL 必须是**浏览器视角能访问到的地址**;如果访客走公网映射(如 `110.16.193.170:50071` → `192.168.106.114:13000`),那 backend 也得有对应的公网映射,`.env.local` 里填的应该是访客视角的 backend URL,**不是** `192.168.106.114:12024`。
+
+### 7.6 deepagents.sh 已经守好端口边界
 
 脚本里有 3 层 stop 保护:
 1. `pkill -f "langgraph dev --host 0.0.0.0 --port ${BACKEND_PORT}"` — 严格匹配启动命令
