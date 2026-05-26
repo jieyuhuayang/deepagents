@@ -10,9 +10,9 @@
 
 | 阶段 | 状态 | 验证日期 | 验证人 |
 |---|---|---|---|
-| 全部 AC 验证通过 | ☐ | | |
-| 全部回归检查通过 | ☐ | | |
-| 截图已附在 `./screenshots/` | ☐ | | |
+| 全部 AC 验证通过 | ◐ | 2026-05-26(AC-1/2/3/4/6/7 后端 curl + grep 通过;AC-5 grep 通过,破坏性回归 + 完整浏览器 demo 留用户) | LineWalker + Claude |
+| 全部回归检查通过 | ◐ | 同上(grep 类回归全过,破坏性回归留浏览器) | 同上 |
+| 截图已附在 `./screenshots/` | ☐ | 截图随用户浏览器手测时归档 | — |
 
 ---
 
@@ -108,9 +108,9 @@ ss -ltn | grep -E ":(12024|13000|5433)"                                         
 
 **预期**:有 AI 回复;`local.db` 自动创建
 
-**截图**:`./screenshots/ac-1-local-sqlite.png`
+**截图**:`./screenshots/ac-1-local-sqlite.png`(待用户浏览器手测时归档)
 
-**结果**:☐ 通过 / ☐ 不通过
+**结果**:☑ **后端通过**(curl `POST /threads/{id}/runs/stream` 触发 SSE 完整流 metadata→values→updates→end,LLM deepseek-v4-pro 返回中文回复;`backend/local.db` 文件自动创建,28672 bytes);浏览器完整 demo 视觉确认留用户
 
 ---
 
@@ -125,9 +125,9 @@ ss -ltn | grep -E ":(12024|13000|5433)"                                         
 
 **预期**:state 字段全部一致;画面渲染与重启前一致
 
-**截图**:`./screenshots/ac-2-local-restart.png`(F5 后画面)
+**截图**:`./screenshots/ac-2-local-restart.png`(F5 后画面,待用户浏览器手测时归档)
 
-**结果**:☐ 通过 / ☐ 不通过
+**结果**:☑ **后端通过** — thread `96e0e65f-c1c3-473c-8ff5-4c6cfd715856` 重启前 `n_messages=2 / checkpoint_id=1f159144-5825-6dfc-8003-d39901b625ba`,uvicorn 进程 kill 后重新启动,GET state 返回**完全一致**的 messages + checkpoint_id;**AsyncSqliteSaver 持久化工作**。浏览器 F5 视觉确认留用户
 
 ---
 
@@ -137,9 +137,9 @@ ss -ltn | grep -E ":(12024|13000|5433)"                                         
 
 **预期**:`deepagents-postgres` healthy + uvicorn LISTEN :12024 + curl /ok 200
 
-**截图**:`./screenshots/ac-3-lab-postgres-docker.png`(`docker ps` 全图)
+**截图**:`./screenshots/ac-3-lab-postgres-docker.png`(`docker ps` 全图,可由 ssh + `docker ps` 截屏归档)
 
-**结果**:☐ 通过 / ☐ 不通过
+**结果**:☑ **通过** — `docker ps deepagents-postgres` Up;uvicorn pid 4192220 监听 :12024;curl `/ok` → `{"ok":true}`;curl `/info` → `{"version":"deepagents-oss/0.5.0","flags":{...},"db_kind":"postgres"}`(`db_kind=postgres` 证明 saver 路由正确)
 
 ---
 
@@ -153,9 +153,9 @@ ss -ltn | grep -E ":(12024|13000|5433)"                                         
 
 **预期**:state 完整;画面一致
 
-**截图**:`./screenshots/ac-4-lab-restart.png`
+**截图**:`./screenshots/ac-4-lab-restart.png`(浏览器 F5,留用户)
 
-**结果**:☐ 通过 / ☐ 不通过
+**结果**:☑ **后端通过** — thread `889fe578-3a7a-4e82-a399-497e46c0e576` 发 "hi" SSE 7 events 完整,`./deepagents.sh stop && start`(Postgres container 不动),uvicorn 进程换了,GET state 仍返回 n_messages=2(human "hi" + ai "Hi! What would you like me to research?")+ checkpoint_id `1f159167-baf4-6ea5-8003-122460804326`;**AsyncPostgresSaver 持久化工作**,`deepagents-postgres` container Up 3 minutes 未重启。浏览器 F5 视觉确认留用户
 
 ---
 
@@ -168,9 +168,9 @@ ss -ltn | grep -E ":(12024|13000|5433)"                                         
 
 **预期**:grep 命中 + body 数组干净 + 200
 
-**截图**:`./screenshots/ac-5-devtools-stream-mode.png`
+**截图**:`./screenshots/ac-5-devtools-stream-mode.png`(留用户浏览器手测)
 
-**结果**:☐ 通过 / ☐ 不通过
+**结果**:◐ **grep 部分通过** — `grep -n "stream_mode" frontend/src/app/hooks/useChat.ts` 命中 line 61-62 + line 65 + line 95(streamMode 配置)+ line 105 等,monkey-patch 整段(line 52-77)仍在源码里;`git diff frontend/src/app/hooks/useChat.ts` 本 feature 期间无任何变化;DevTools `/runs/stream` body 数组检查 + 浏览器侧 422 守护回归留用户手测
 
 ---
 
@@ -183,7 +183,7 @@ ss -ltn | grep -E ":(12024|13000|5433)"                                         
 
 **预期**:两个 grep 都命中;reviewer pass
 
-**结果**:☐ 通过 / ☐ 不通过
+**结果**:☑ **通过** — `grep -n "checkpointer=" backend/agent.py` 命中 line 10(docstring 引用)+ **line 68**(`build_agent` 中真正的 kwarg 传入);`grep -n "CLI 模式\|自研 server 模式" CLAUDE.md` 命中 line 48-49 两段拆分文本
 
 ---
 
@@ -196,7 +196,7 @@ ss -ltn | grep -E ":(12024|13000|5433)"                                         
 
 **预期**:grep 命中预期;reviewer pass
 
-**结果**:☐ 通过 / ☐ 不通过
+**结果**:☑ **通过** — `grep "langgraph up" CLAUDE.md docs/architecture.md docs/troubleshooting.md README.md` 命中 4 处,**全部在历史/ADR 引用上下文**(均带 "ABANDONED" / "撤回历史" / "曾计划" 等明确标记);`grep "uvicorn server:app" CLAUDE.md docs/architecture.md README.md` 命中 9 处,跨 CLAUDE.md §仓库总览 + §常用命令 / architecture.md §1 部署模型表 / README.md §2 启动 + §5 lab host 部署小节
 
 ---
 
@@ -206,9 +206,9 @@ ss -ltn | grep -E ":(12024|13000|5433)"                                         
 
 ### 必跑回归(对应 spec §4 触碰条目)
 
-- [ ] **第 3 条回归 - 显式 checkpointer**:`grep -n "checkpointer=" backend/agent.py` 至少 1 处命中
-- [ ] **第 3 条回归 - CLAUDE.md 拆分文本**:`grep "CLI 模式\|自研 server 模式" CLAUDE.md` 命中两种 mode 各一段
-- [ ] **第 7 条回归 - monkey-patch 仍在**:`grep -n "stream_mode" frontend/src/app/hooks/useChat.ts` 命中 line 58-67 区间 + `git diff` 该文件应为空(本 feature 不动它)
+- [x] **第 3 条回归 - 显式 checkpointer**:`grep -n "checkpointer=" backend/agent.py` 命中 line 10 + 68 ✓
+- [x] **第 3 条回归 - CLAUDE.md 拆分文本**:`grep "CLI 模式\|自研 server 模式" CLAUDE.md` 命中 line 48-49 ✓
+- [x] **第 7 条回归 - monkey-patch 仍在**:`grep -n "stream_mode" frontend/src/app/hooks/useChat.ts` 命中(line 52-77 useEffect 整段);`git diff frontend/src/app/hooks/useChat.ts` 本 feature 期间无变化 ✓
 - [ ] **第 7 条破坏性回归(关键!)**:
   1. 临时把 `frontend/src/app/hooks/useChat.ts` line 52-77 整段 `useEffect` **手动注释**
   2. `cd frontend && yarn build`(prod build)
@@ -219,12 +219,12 @@ ss -ltn | grep -E ":(12024|13000|5433)"                                         
 
 ### 常规回归(其他强约束未触碰,跑一遍兜底)
 
-- [ ] **GenerativeUI 卡片仍渲染**:发出一个会触发 `emit_research_card` 的请求,对话流中 ≥ 1 张 ResearchCard
-- [ ] **HITL 仍 dormant**:`grep -n "interrupt_on" backend/agent.py` 应零命中(本 feature 未误启 HITL)
-- [ ] **GenerativeUIMiddleware 仍装配**:`grep -n "GenerativeUIMiddleware()" backend/agent.py` 命中
-- [ ] **DashScope 模型未被换**:`grep -n "base_url" backend/agent.py` 仍指 dashscope
-- [ ] **`streaming=True` 未被改**:`grep -n "streaming" backend/agent.py` 仍为 `True`
-- [ ] **prompts.py 强制语序未弱化**:`grep -c "MUST" backend/prompts.py` 与改动前一致(本 feature 不动 prompts.py)
+- [ ] **GenerativeUI 卡片仍渲染**:发出一个会触发 `emit_research_card` 的请求,对话流中 ≥ 1 张 ResearchCard(留用户浏览器手测,与完整 demo 合并)
+- [x] **HITL 仍 dormant**:`grep -n "interrupt_on" backend/agent.py` 零命中 ✓(本 feature 未误启 HITL)
+- [x] **GenerativeUIMiddleware 仍装配**:`grep -n "GenerativeUIMiddleware()" backend/agent.py` 命中 line 66 ✓
+- [x] **DashScope 模型未被换**:`grep -n "base_url" backend/agent.py` 命中 line 39 仍指 dashscope ✓
+- [x] **`streaming=True` 未被改**:`grep -n "streaming" backend/agent.py` 命中 line 41 仍 True ✓
+- [x] **prompts.py 强制语序未弱化**:本 feature `git diff backend/prompts.py` 无任何变化 ✓
 
 ---
 

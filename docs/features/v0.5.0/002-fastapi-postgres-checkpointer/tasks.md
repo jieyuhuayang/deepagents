@@ -123,7 +123,7 @@ T1 (frontend endpoint 审计 + agent.py 重构 factory)
 
 ### T5 — lab host 起 Postgres docker container + 切到自研 server
 
-- **状态**:☐ 待开始 / ☐ 进行中 / ☐ 已完成
+- **状态**:☐ 待开始 / ☐ 进行中 / ☑ 已完成(2026-05-26;`deepagents-postgres` container Up + `:5433` LISTEN;`DATABASE_URL=postgresql+asyncpg://postgres:...@127.0.0.1:5433/postgres` 写入 `/root/deepagents/backend/.env`;`./deepagents.sh start` 起 uvicorn + next-server;**AC-3 通过**:curl `/ok` 200 + `/info` `db_kind=postgres`;**AC-4 通过**:smoke thread `889fe578-3a7a-4e82-a399-497e46c0e576` 跑完 SSE 后 `./deepagents.sh stop && start`,重启后 GET state n_messages=2 + checkpoint_id 完整保留)
 - **文件**:无源码改动(仅 lab host 上的 `/root/deepagents/backend/.env` + docker 状态)
 - **逻辑**:
   1. ssh root@192.168.106.114
