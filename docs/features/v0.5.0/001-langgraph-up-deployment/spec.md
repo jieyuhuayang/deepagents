@@ -1,14 +1,22 @@
-# Spec: langgraph up 持久化部署(lab host 双轨)
+# Spec: langgraph up 持久化部署(lab host 双轨) — **ABANDONED**
 
+> ⚠️ **状态:ABANDONED(2026-05-26)** — superseded by [`../002-fastapi-postgres-checkpointer/`](../002-fastapi-postgres-checkpointer/)
+>
+> **撤回原因**:实施 Step 6 时发现 `langgraph up` 用的 `langchain/langgraph-api:3.11` 是 **LangChain 公司的商业产品 LangGraph Platform**,启动时强制 `LANGSMITH_API_KEY`(Plus 计划) 或 `LANGGRAPH_CLOUD_LICENSE_KEY` 验 license(`ValueError: License verification failed` exit 3,见 tasks.md §"实际偏差记录")。这与 spec 原本"零 LangSmith 依赖"的设计目标冲突,且 lab host docker container outbound HTTPS 被防火墙挡(包括 LangSmith license 验证端点)。
+>
+> **本 feature 保留作为踩坑 ADR**——记录 LangGraph 三层分层(核心库 OSS / langgraph dev OSS / langgraph up 商业)的认知校准 + lab host 网络限制的实测结果。新方案见 002,走 LangGraph 开源路径(自研轻量 FastAPI server + `langgraph-checkpoint-postgres`)。
+>
+> ---
+>
 > Feature ID: `001-langgraph-up-deployment` · 版本归属: `v0.5.0` · Owner: LineWalker · 创建日期: `2026-05-26`
 
 ## 状态
 
 | 阶段 | 状态 | 备注 |
 |---|---|---|
-| 已起草 | ☑ | 2026-05-26 起草;Spec Discovery 4 轮决策 + sdd-review 4 处修订(AC-1 端口 8123 / AC-2 container 名 / §4 第 7 条不一致 / §6 不加 LANGSMITH)已固化 |
+| 已起草 | ☑ | 2026-05-26 起草;Spec Discovery 4 轮决策 + sdd-review 4 处修订已固化 |
 | 已评审(`/sdd-review spec` 通过 + ★ 用户确认) | ☑ | 2026-05-26 · LineWalker ★ 确认 |
-| 已完成(verification.md 全绿) | ☐ | — |
+| 已完成(verification.md 全绿) | ☒ | **ABANDONED 2026-05-26**(见上方撤回原因);见 002 |
 
 ---
 

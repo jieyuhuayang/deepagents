@@ -1,5 +1,8 @@
-# Tasks: langgraph up 持久化部署(lab host 双轨)
+# Tasks: langgraph up 持久化部署(lab host 双轨) — **ABANDONED**
 
+> ⚠️ **ABANDONED 2026-05-26** —— 详见 [`./spec.md`](./spec.md) 顶部撤回说明 + 下方 §"实际偏差记录"完整踩坑轨迹。
+> Successor: [`../002-fastapi-postgres-checkpointer/`](../002-fastapi-postgres-checkpointer/)。
+>
 > Spec: [`./spec.md`](./spec.md) · Verification: [`./verification.md`](./verification.md)
 
 ## 状态
@@ -8,7 +11,7 @@
 |---|---|---|
 | 已起草 | ☑ | 2026-05-26 |
 | 已评审(`/sdd-review tasks` 通过) | ☑ | 2026-05-26 · 自动通过 |
-| 已完成(所有任务 ✅ + verification.md 全绿) | ☐ | — |
+| 已完成(所有任务 ✅ + verification.md 全绿) | ☒ | **ABANDONED 2026-05-26**(实施 T5 发现 langgraph up 商业 license + lab host docker bridge 防火墙双重阻塞,见 §"实际偏差记录"末两行);T1-T4 文档/配置改动已落盘,002 会复用部分内容 |
 
 ---
 
@@ -148,3 +151,4 @@ T4 (docs/troubleshooting.md §1.1 扩展 + §1.5 新增)        ┘
 | 2026-05-26 | T5 | T5 verification 跑通需要 lab host 上从 `langgraph dev` 切到 `langgraph up`(停现有 backend / 拉镜像 / 起 3 个 container / 改前端 build 用新 Deployment URL),会停摆部署 5-30 分钟。memory `feedback_shared_lab_host_scope.md` 要求"kill/重启 lab host 上的进程"前先问用户。 | **暂停 T5,等用户对齐切换方案** —— 关键决策点:(a) 这次只是"实地验证"还是"永久切到 up"?(b) 镜像拉取要不要 registry mirror?(c) 拉完测完是否要保留 langgraph up 作为常驻部署、还是验证完切回 langgraph dev。等用户答复后再 ssh 操作。**用户答复:(a) 永久切换 (b) 直接拉先试 (c) 永久部署。开始实施 lab host 操作。** |
 | 2026-05-26 | T5 | 首次跑 `langgraph up` 在 docker build step "pip install" 失败:container 内 `https://pypi.org/simple/ddgs/` 连接被拒(`Connection refused`)。诊断:host 能直连 pypi.org(HTTP 200, 0.96s),container 内不能(被防火墙挡);国内 mirror (tuna/aliyun/tencent) 全部可达。**spec.md §6 文件清单没列 `pip.conf` 或 `langgraph.json` 改动**,但这是实施时发现的真实约束——docker container 在 lab host 网络下必须走国内 pip mirror。 | **接受偏差,不回改 spec** —— 范围内最小修复:(1) 新建 `backend/pip.conf`,index-url 指向 `pypi.tuna.tsinghua.edu.cn`;(2) `backend/langgraph.json` 加 `"pip_config_file": "./pip.conf"`,让 `langgraph build` / `langgraph up` 在 docker container 内用这套 pip 配置。本地 Macbook `langgraph dev` 不走 docker build,pip.conf 对本地无影响。AC 不变(AC-1 仍是"三 container healthy");这条偏差是部署环境网络限制的"修复路径",可写进 README §5.2 注脚补充说明,但不在本期范围。 |
 | 2026-05-26 | T5 | 加了 `pip_config_file` 后第二次跑 `langgraph up` 仍失败:`PIP_CONFIG_FILE=/pipconfig.txt` env 已正确注入 container,但 build 内用的是 **`uv pip install`**(`langgraph-api:3.11` base image 强制 uv),**uv 不读 pip.conf**,继续连 pypi.org failed。 | **接受偏差,在已登记的"实际偏差记录"基础上加 `dockerfile_lines` 字段** —— `backend/langgraph.json` 增加 `"dockerfile_lines": ["ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple/"]`,让 uv 在 docker build 时走 tuna mirror。pip.conf 保留(作为非 uv 路径的兜底),`UV_INDEX_URL` 是真正生效的设置。架构 §3 没有提到 langgraph build 用的是 uv 而非 pip 这个细节(因为之前都用 langgraph dev,不走 build);完成后建议在 architecture.md 加一句说明。 |
+| 2026-05-26 | T5 | **第三次 `langgraph up`**:`langgraph build -t deep-research-backend:local --no-pull --network=host` build 成功(host network 绕过 docker bridge HTTPS 限制),`langgraph up --image deep-research-backend:local --wait` 后 postgres / redis container healthy,**但 `backend-langgraph-api-1` exited (3)**:`License verification failed. For local development, set a valid LANGSMITH_API_KEY ... For production, configure LANGGRAPH_CLOUD_LICENSE_KEY`。诊断:`langchain/langgraph-api:3.11` 是 **LangChain 公司的商业产品 LangGraph Platform**(langgraph 三层分层:核心库 OSS / `langgraph dev` OSS / `langgraph up` 商业),启动强制 license 验证;且 lab host docker container outbound HTTPS 被防火墙挡(host 能 reach `api.smith.langchain.com` HTTP 200, container bridge mode 不通,host network mode wget 也 timeout)。 | **撤回本 feature,严重偏离 spec 设计前提("零 LangSmith 依赖"+ "免费部署路径"),不再回 Step 2 修补——开新 feature 002 走开源路径**:不用 langgraph up,改在 backend 加一层薄 FastAPI server + `langgraph-checkpoint-postgres` 的 `AsyncPostgresSaver` 显式传给 `create_deep_agent`。详见 [`../002-fastapi-postgres-checkpointer/spec.md`](../002-fastapi-postgres-checkpointer/spec.md)。本 feature 保留作为 ADR:踩坑历史、`langgraph up` license 真相、lab host 网络实测、`pip_config_file`/`dockerfile_lines`/UV_INDEX_URL 等细节,以及"docker bridge HTTPS 出口被防火墙挡"的事实——这些对 002 实施和未来 maintainer 都有价值。已 commit 的 CLAUDE.md/architecture.md/troubleshooting.md/README/.env.example/pip.conf/langgraph.json 改动**部分仍有效**,002 会按需复用或回滚。 |
