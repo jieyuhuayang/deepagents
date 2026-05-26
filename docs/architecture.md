@@ -31,6 +31,15 @@
 
 **故障与扩展定位**:启动错误或具体运行期现象先查 [troubleshooting.md](./troubleshooting.md);想理解"agent 实际怎么跑"看 §2.0;搞清楚某个机制能不能扩展、为什么这样设计看 §2.x;哪些代码因为基于 vendored 上游而不能动看 §3;评估"上游升级后能拆掉哪些适配"看 §4。
 
+**双轨部署模型**(自 v0.5.0,详见 `docs/features/v0.5.0/001-langgraph-up-deployment/spec.md`):
+
+| 场景 | CLI | 端口 | Checkpointer | 适用 |
+|---|---|---|---|---|
+| 本地开发 | `langgraph dev` | `:2024` | in-memory(进程重启即丢) | Macbook 上写代码、热重载、单人 demo |
+| 多人共享 / 持久化部署 | `langgraph up` | `:8123` | Postgres(docker compose 自带 container) | lab host (192.168.106.114) 等需要重启后保留 thread state 的场景 |
+
+两种模式下 `backend/agent.py` 代码**完全一致**——`create_deep_agent` 不传 `checkpointer=`,CLI/runtime 都会自动接管。前端通过 `NEXT_PUBLIC_*` 环境变量切换 Deployment URL(见 commit `93cb122` + `6155088`)。
+
 ## 2. 运行机制
 
 §2.0 先给出端到端调研工作流的步骤总览,作为下面各子系统的语境。然后按 deepagents 的四字段 state schema 切分子系统:**编排**(§2.1 主 agent 怎么调度,内含 §2.1.1 工具清单)、**状态**(§2.2 messages/todos/files/ui 如何承载工作记忆)、**人在回路**(§2.3 关键操作如何让用户介入)、**渲染**(§2.4 前端如何把进度可视化)。§2.5 / §2.6 则分别讲多格式报告产物和两种暂停机制——它们横跨多个子系统,单列章节方便排错与扩展时定位。
@@ -142,7 +151,7 @@ class GenerativeUIMiddleware(AgentMiddleware[GenerativeUIState, Any, Any]):
 
 **扩展边界**:想加更多 state 字段(如 `metrics`、`citations`),继续往 middleware 的 `state_schema` 里加,不要去改 deepagents 源码。
 
-**另一个状态层约束**:`langgraph dev` 是 LangGraph Platform 的本地模拟器,**自动管 checkpointer**——用户不能在 `create_deep_agent` 里再传 `MemorySaver` 或 `checkpointer=...`,传了启动失败。
+**另一个状态层约束**:`langgraph dev`(本地开发,inmem)和 `langgraph up`(lab host 部署,Postgres)**都**自动管 checkpointer,用户在 `create_deep_agent` 里**任一模式下都不要再传** `MemorySaver` 或 `checkpointer=...`,传了启动失败。两者的本质差异仅在底层存储(inmem vs Postgres),业务代码层完全一致;何时该用哪种、双轨切换怎么操作详见上文 §1 末尾"双轨部署模型"表 + `docs/features/v0.5.0/001-langgraph-up-deployment/spec.md`。
 
 ### 2.3 人在回路:当前 dormant + 重启路径
 

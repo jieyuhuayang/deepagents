@@ -43,7 +43,7 @@ yarn build     # next build
 
 - **不要删 `GenerativeUIMiddleware`**。`deepagents._DeepAgentState` 没有 `ui` 字段,删了 `push_ui_message` 会被默默丢弃。升级 `deepagents` 时先验证 `_DeepAgentState` 是否补了 `ui`,确认后才能删。详见 §2.2。
 - **LLM provider 锁定 `ChatOpenAI` + DashScope base_url**。不要换 `init_chat_model("anthropic:...")` 或 LangChain provider registry——它们没法指向 DashScope。详见 §2.1。
-- **不要在 `create_deep_agent` 里传 `checkpointer` / `MemorySaver`**。`langgraph dev` 自动管 checkpointer,传了启动失败。
+- **不要在 `create_deep_agent` 里传 `checkpointer` / `MemorySaver`**。`langgraph dev`(本地开发,inmem checkpointer)和 `langgraph up`(lab host 部署,Postgres checkpointer)**都**自动管 checkpointer,任一模式下传了都会启动失败。详见 `docs/architecture.md §2.2` 末尾。
 - **不要把 `streaming=True` 改回 `False`**(`agent.py:24`)。曾有"DashScope tools+stream 互斥"的判断已证伪,现代模型支持。详见 §2.1 历史踩坑提示。
 - **前端是 vendored 副本,有 4-6 处本地 patch**。`cd frontend && git pull` 前必须 `git diff > /tmp/patches.diff` 留底再 `git apply` 回去。详见 §3.1。
 - **HITL 批量审批是"全 approve / 全 reject"语义**。`broadcastResumeInterrupt` 把单决策广播到 N 个 action_requests,**无法对单个 action 做不同决策**。要细粒度要重写 `ToolApprovalInterrupt`。语义说明见 §2.3,实现细节见 §3.2。

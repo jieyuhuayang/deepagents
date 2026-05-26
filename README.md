@@ -91,7 +91,79 @@ yarn dev           # → http://localhost:3000
 
 保存。
 
-## 验证：一次性触发 5 大能力
+### 5. lab host 部署(`langgraph up`,Postgres 持久化)
+
+> **仅 lab host (例如 192.168.106.114) 用。本地 Macbook 仍走 `langgraph dev` (上面 §2),不要在本地起 `langgraph up`,会拉镜像 + 占资源。** 详见 `docs/features/v0.5.0/001-langgraph-up-deployment/spec.md`。
+
+**为什么不在 lab host 上继续用 `langgraph dev`?** `langgraph dev` 用 in-memory checkpointer,进程重启就丢全部 thread state——多人共享 / 服务可能被重启的场景下不可接受。`langgraph up` 用 docker compose 起 langgraph-api + Postgres + Redis 三个 container,Postgres 持久化 thread state,重启后状态完整保留。背景见 `docs/troubleshooting.md §1.5`。
+
+#### 5.1 前置
+
+- lab host 上已装 Docker (≥ 24) + Docker Compose v2
+- lab host 能拉 `langchain/langgraph-api` / `postgres` / `redis` 镜像(国内网络可能要先配 registry mirror)
+- 已有的 lab host 部署用 `./deepagents.sh start` 跑 `langgraph dev :12024`;切到 `langgraph up` 前必须先 `./deepagents.sh stop` 释放端口
+
+#### 5.2 启动
+
+```bash
+ssh root@192.168.106.114
+cd /root/deepagents
+
+# 1. 停掉旧的 langgraph dev + next-server(deepagents.sh 不动,仅适用于 dev 模式)
+./deepagents.sh stop
+
+# 2. 切到 backend 目录,启动 langgraph up
+cd backend
+langgraph up                       # 默认 :8123;首次拉镜像可能慢
+# 或者 override 端口(端口冲突时):
+# langgraph up --port 8123         # 端口可改
+
+# 3. 起前端(prod build,见 memory feedback-next-prod-for-lan-deploy)
+cd ../frontend
+npm run build                      # 改完代码必跑
+NEXT_PUBLIC_LANGGRAPH_API_URL=http://192.168.106.114:8123 \
+NEXT_PUBLIC_ASSISTANT_ID=research \
+  npm run start -- -H 0.0.0.0 -p 13000
+```
+
+#### 5.3 健康检查
+
+```bash
+docker ps --format 'table {{.Names}}\t{{.Status}}'   # 应看到 langgraph-api / langgraph-postgres-* / langgraph-redis-* 全部 (healthy)
+curl http://192.168.106.114:8123/ok                  # 应返回 {"ok":true}
+```
+
+#### 5.4 端口配置(冲突时 override)
+
+lab host 上已有 redis (host 装的,`:6379`)。`langgraph up` 自带 redis 默认也是 `:6379`,**冲突,必须 override**。在 `backend/.env` 里:
+
+```
+REDIS_PORT=6380       # 自带 Redis 改用 6380(默认 6379 与 host 上已有 redis 冲突)
+POSTGRES_PORT=5433    # 自带 Postgres 改用 5433(如 host 已有 Postgres 在 5432)
+LANGGRAPH_PORT=8123   # 默认 8123,与 host 上其他服务都不冲突
+```
+
+实际可用占位见 `backend/.env.example` 末尾段。
+
+#### 5.5 数据持久化
+
+`langgraph up` 默认用 docker volume 存 Postgres 数据,`docker compose down` **不**清数据,**只有** `docker compose down -v` 才清。重启 backend 用 `docker restart langgraph-api`,不会丢 thread。
+
+#### 5.6 与本地 `langgraph dev` 的差异
+
+| 项 | 本地 (`langgraph dev`) | lab host (`langgraph up`) |
+|---|---|---|
+| Checkpointer | in-memory | Postgres (docker volume 持久化) |
+| 后端端口 | `:2024` | `:8123` |
+| 启动方式 | `langgraph dev` 命令直接跑 | docker compose 起 3 个 container |
+| 进程重启影响 | thread state 全丢 | thread state 保留 |
+| 适用 | 本机开发、单人 demo | 多人共享、可被重启的环境 |
+
+详细对比 + 决策见 `docs/architecture.md §1` 末尾"双轨部署模型"表 + `docs/features/v0.5.0/001-langgraph-up-deployment/`。
+
+---
+
+## 验证:一次性触发 5 大能力
 
 把这段贴进对话框：
 
