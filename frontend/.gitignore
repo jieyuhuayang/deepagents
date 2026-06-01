@@ -40,3 +40,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# SDD 测试产物(vitest / playwright)
+/test-results/
+/playwright-report/
+/playwright/.cache/
+/blob-report/

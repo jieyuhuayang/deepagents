@@ -271,6 +271,7 @@ export const LOCAL_UI_COMPONENTS = { research_card: ResearchCard };
 | `hooks/useResumeInterrupt.tsx` | 新增 React Context + Provider + hook | 让 generative-ui 组件不通过 prop drill 自取 resume callback;见 §2.6 |
 | `components/sidebar/TasksFilesSidebar.tsx` | 新增 `normalizeFileEntry()` 把 `RawFileEntry` 归一成 `FileItem`(`{path, content, encoding}`),encoding 字段透传给 `FileViewDialog`;多格式文件图标(html / docx / md 等) | 让前端能消费 §2.5 的多格式 FileData(string 旧形态 + `{content, encoding}` 新形态) |
 | `components/dialog/FileViewDialog.tsx` | encoding 路由(`encoding === "base64"` 走二进制占位卡 + atob 下载;`.html` 走 `<iframe srcDoc sandbox="allow-same-origin">`,**不**开 `allow-scripts`;`.md` 走 `MarkdownContent`;其他 utf-8 走 `SyntaxHighlighter`)+ `MIME_BY_EXT` 表(md / html / docx / pptx / pdf / json / txt) | §2.5 多格式渲染的前端核心路由 |
+| **SDD 测试基建(新增)**:`package.json`(test/e2e scripts + vitest/playwright/testing-library devDeps)、`vitest.config.ts`、`test/setup.ts`、`*.test.tsx`(组件 Test-Alongside)、`playwright.config.ts`、`e2e/`(E2E + fixtures) | 本地新增,vendored 副本上层 | SDD 三层测试落地(见 `docs/sdd/SDD-Guide.md §5`)。**上游 `git pull` 前同样要 `git diff` 留底**,否则这些新增文件 + package.json 改动会与上游冲突 |
 
 #### 3.1.1 ChatMessage.tsx 第 128 行的 task skip
 
