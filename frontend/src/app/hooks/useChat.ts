@@ -12,6 +12,7 @@ import type { UseStreamThread } from "@langchain/langgraph-sdk/react";
 import type { TodoItem } from "@/app/types/types";
 import { useClient } from "@/providers/ClientProvider";
 import { useQueryState } from "nuqs";
+import { getActiveSkillIds } from "@/lib/config";
 
 // deepagents 后端 state.files 实际是 dict[str, FileData],FileData =
 // {content, encoding, created_at?, modified_at?}。string 形态保留是为了向后
@@ -109,7 +110,17 @@ export function useChat({
           optimisticValues: (prev) => ({
             messages: [...(prev.messages ?? []), newMessage],
           }),
-          config: { ...(activeAssistant?.config ?? {}), recursion_limit: 100 },
+          config: {
+            ...(activeAssistant?.config ?? {}),
+            recursion_limit: 100,
+            // per-run skill 白名单。读最新 localStorage 值,SkillWhitelistMiddleware
+            // 据此过滤注入(见 spec AC-5)。空数组 = 全关。
+            configurable: {
+              ...((activeAssistant?.config as { configurable?: Record<string, unknown> })
+                ?.configurable ?? {}),
+              active_skills: getActiveSkillIds(),
+            },
+          },
         }
       );
       // Update thread list immediately when sending a message

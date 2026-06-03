@@ -30,9 +30,22 @@ dependencies = [
     "pypandoc-binary>=1.13",
 ]
 
+[project.optional-dependencies]
+# SDD 三层测试的后端层(Test-First)。装法:pip install -e ".[test]"
+# 详见 docs/sdd/SDD-Guide.md §5 测试模型。httpx 已在主依赖,FastAPI TestClient 现成可用。
+test = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = ["agent", "tools", "prompts", "middlewares", "web_search"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]          # 让扁平 py-modules(server/agent/web_search…)可直接 import
+asyncio_mode = "auto"

@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { FilesPopover } from "@/app/components/TasksFilesSidebar";
 import { ResumeInterruptProvider } from "@/app/hooks/useResumeInterrupt";
+import { SkillsPopover } from "@/app/components/SkillsPopover";
 
 interface ChatInterfaceProps {
   assistant: Assistant | null;
@@ -541,6 +542,9 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
               rows={1}
             />
             <div className="flex justify-between gap-2 p-3">
+              <div className="flex items-center gap-2">
+                <SkillsPopover />
+              </div>
               <div className="flex justify-end gap-2">
                 <Button
                   type={isLoading ? "button" : "submit"}

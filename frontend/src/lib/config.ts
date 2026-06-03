@@ -2,6 +2,10 @@ export interface StandaloneConfig {
   deploymentUrl: string;
   assistantId: string;
   langsmithApiKey?: string;
+  // 激活的 skill 名白名单(随 run 以 config.configurable.active_skills 提交)。
+  // 存 skill 的 `name`(SkillsMiddleware 按 name 合并),不是 id。见
+  // docs/features/v0.6.0/001-skill-loading-whitelist/spec.md §4.4。
+  activeSkillIds?: string[];
 }
 
 const CONFIG_KEY = "deep-agent-config";
@@ -43,5 +47,41 @@ export function getConfig(): StandaloneConfig | null {
 
 export function saveConfig(config: StandaloneConfig): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+  // 保留已存的 activeSkillIds:ConfigDialog 的 StandaloneConfig 不带这个字段,
+  // 若直接整体覆写会把 skill 白名单清空(数据丢失)。仅当 config 显式带了该字段
+  // 才用新值。activeSkillIds 的常规写入走 saveActiveSkillIds(字段级)。
+  const merged: StandaloneConfig = { ...config };
+  if (merged.activeSkillIds === undefined) {
+    const existing = getActiveSkillIds();
+    if (existing.length > 0) merged.activeSkillIds = existing;
+  }
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(merged));
+}
+
+// ── 激活 skill 白名单 ──────────────────────────────────────────────────────
+// 与主 config 同存 `deep-agent-config` 对象,读写时只动 activeSkillIds 字段,
+// 不 clobber deploymentUrl/assistantId(SkillsPopover 与配置弹窗各管各的字段)。
+
+function readRawConfig(): Record<string, unknown> {
+  if (typeof window === "undefined") return {};
+  const stored = localStorage.getItem(CONFIG_KEY);
+  if (!stored) return {};
+  try {
+    return JSON.parse(stored);
+  } catch {
+    return {};
+  }
+}
+
+export function getActiveSkillIds(): string[] {
+  const raw = readRawConfig();
+  const ids = raw.activeSkillIds;
+  return Array.isArray(ids) ? (ids as string[]) : [];
+}
+
+export function saveActiveSkillIds(ids: string[]): void {
+  if (typeof window === "undefined") return;
+  const raw = readRawConfig();
+  raw.activeSkillIds = ids;
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(raw));
 }
