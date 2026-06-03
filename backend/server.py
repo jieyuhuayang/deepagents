@@ -51,7 +51,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.types import Command
 
-from agent import build_agent
+from agent import build_agent, get_skill, list_skills
 
 load_dotenv()
 
@@ -381,6 +381,26 @@ async def info(request: Request):
         "flags": {"assistants": True, "crons": False, "langsmith": False},
         "db_kind": getattr(request.app.state, "db_kind", "unknown"),
     }
+
+
+# ---------------------------------------------------------------------------
+# Skills(只读列表 / 详情)—— 与 LangGraph SSE 独立的 skill 管理 API。
+# 上传/编辑/删除 CRUD 留作后续 feature(见 v0.6.0/001 spec §3.2 非目标)。
+# `{skill_id:path}` 转换器:id 形如 "built-in/deep-research" 含斜杠。
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/skills")
+async def api_skills_list():
+    return list_skills()
+
+
+@app.get("/api/skills/{skill_id:path}")
+async def api_skill_detail(skill_id: str):
+    skill = get_skill(skill_id)
+    if skill is None:
+        raise HTTPException(404, f"skill '{skill_id}' not found")
+    return skill
 
 
 # ---------------------------------------------------------------------------

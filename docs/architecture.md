@@ -251,6 +251,25 @@ export const LOCAL_UI_COMPONENTS = { research_card: ResearchCard };
 
 **`interrupt()` 的 re-execution 陷阱**(普适知识):`interrupt(value)` 在同一 task 内第一次调用抛 `GraphInterrupt` halt,resume 后 node **从头重跑**,直到这次调用直接 return resume value(不再抛)。这意味着 **`interrupt()` 之前的代码会跑两次**。本项目 `request_clarification` 在 interrupt 之前**无副作用**(已删除原本的 push_ui_message,见上方 caveat),所以无幂等性顾虑。但**未来若在 `interrupt()` 之前加新副作用(写文件 / 调外部 API)前,必须重新评估幂等性**(参考 §2.5 的 dedup 模式)。
 
+### 2.7 Skills 系统:加载 + per-run 白名单(v0.6.0/001)
+
+把 Anthropic Agent Skills(progressive disclosure)作为可热插拔的"流程知识"引入。**目标**:把领域流程从 `prompts.py` 源码逐步挪到磁盘上的 skill 包,用户在前端按对话开关,后端只把激活的 skill metadata 注入 prompt。本期(001)是端到端最小纵切,**只做加载 + 白名单 + 只读 API + 前端开关**;CRUD/管理页/上传/interpreter/抽取 `prompts.py` 留作后续(见 PRD `docs/prds/0.6.0/skills.md` 阶段拆分)。
+
+**加载与注入(后端)**:
+
+- skill 落在 `backend/data/skills/<source>/<name>/SKILL.md`(本期只有 `built-in/deep-research`),`SKILLS_ROOT` 由 `DEEPAGENTS_SKILLS_ROOT` env 覆盖。
+- `agent.py` 自己构造 `SkillWhitelistMiddleware(backend=FilesystemBackend(root_dir=SKILLS_ROOT, virtual_mode=True), sources=["/built-in/"])` 放进 `create_deep_agent(middleware=[...])`,**排在 `GenerativeUIMiddleware` 之前**(`test_arch_invariants` 守这条顺序)。
+- **三个"不要"**(都验证过):① 不传 `create_deep_agent(skills=...)`——会自动多插一个全量 `SkillsMiddleware` 造成双重注入;② 不传 `create_deep_agent(backend=...)`——`SkillsMiddleware` 用自己构造时的 backend 读 skill(见其 `_get_backend`),给 `create_deep_agent` 传 backend 反而会把 agent 的 `write_file`/`export_docx` 从默认 state 虚拟 FS 换成真磁盘(回归 §2.5);③ `virtual_mode` 必须 `True`,否则 `sources` 的 `/built-in/` 被当绝对路径,skill 加载为空。
+- `SkillsMiddleware.before_agent` 扫 `sources` 写入 `state["skills_metadata"]`(持久化、只加载一次);`modify_request` 每次 model call 从该字段重渲染 skills 段 append 到 system message(progressive disclosure:只注入 frontmatter,正文靠 LLM `read_file`)。
+
+**per-run 白名单(关键)**:`SkillWhitelistMiddleware` 子类化 `SkillsMiddleware`,在 `modify_request` 渲染**之前**按本轮 `config.configurable.active_skills`(经 `langgraph.config.get_config()` 读)过滤 `skills_metadata`:`None`/缺键 ⇒ 不过滤(安全默认,兼容旧客户端),`[]` ⇒ 零注入,`[...]` ⇒ 按 `name` 取交集。**为什么过滤在渲染前而非"注入后再 strip"**:基类把 skills 段 append 到 system message,后注入文本无法干净反注入——子类化只裁剪 metadata,一次渲染、一个事实源(实测 `request.override(state=...)` 不可变路径)。
+
+**只读 HTTP API**:与 LangGraph SSE 独立,挂在自研 `server.py` 同端口(2024)。`agent.py` 提供纯函数 `list_skills()`/`get_skill(id)`(`os.walk` + frontmatter 解析,与中间件加载解耦、可单测),`server.py` 暴露 `GET /api/skills`、`GET /api/skills/{skill_id:path}`(id 形如 `built-in/deep-research` 含斜杠,故用 `:path` 转换器)。
+
+**前端**:聊天框底部 `SkillsPopover`(新 `@radix-ui/react-popover` 依赖)打开时拉 `GET /api/skills`,每行 name+描述+`Switch`;勾选写 `deep-agent-config.activeSkillIds`(存 skill `name`),`useChat.sendMessage` 在 `stream.submit` 时读最新值注入 `config.configurable.active_skills`(**不碰 fetch monkey-patch**,见 §3.1/§3.3)。
+
+> 强约束守护:`GenerativeUIMiddleware` 保留且 `SkillWhitelistMiddleware` 排其前(`test_arch_invariants`);`prompts.py` 强制语序本期不动(deep-research skill 为附加内容,不抽取)。完整规格见 `docs/features/v0.6.0/001-skill-loading-whitelist/`。
+
 ## 3. 跨上游适配的硬约束
 
 本系统基于三个上游:**deepagents**(后端编排框架)、**deep-agents-ui**(vendored 前端,直接 clone 在 `frontend/`)、**@langchain/langgraph-sdk**(前端订阅 SSE 的 SDK)。当前版本下,这三个上游各自存在需要本地适配的硬约束,本章集中记录。每条约束在 §4 都有"何时可拆"的判定。
@@ -266,12 +285,14 @@ export const LOCAL_UI_COMPONENTS = { research_card: ResearchCard };
 | `ToolCallBox.tsx` | props 加 `components`,透传给 `LoadExternalComponent` | 让本地 generative UI 组件能命中(HITL dormant 期间不活跃) |
 | `ChatMessage.tsx` | import `LOCAL_UI_COMPONENTS` 并注入;去掉 `task` 无条件 skip;`toolCalls.map` 内加 `request_clarification` 分支,直接渲染 `ClarificationCard` 从 `toolCall.args`(不走 LOCAL_UI_COMPONENTS) | 让本地组件 registry 生效;让 task HITL 审批卡能显示(HITL dormant 期间不活跃);让 Step 0 澄清卡用持久化数据源渲染(见 §2.6 caveat) |
 | `ChatInterface.tsx` | 新增 `broadcastResumeInterrupt`(HITL dormant 期间不活跃);ui filter 兼容 `tool_call_id`;用 `<ResumeInterruptProvider>` 包 `processedMessages.map`,把 resume callback 通过 React Context 暴露给 generative-ui 组件 | 见 §3.2;Context 让 `ClarificationCard` 不依赖 prop drill onResume(`LoadExternalComponent` 不透传 onResume) |
-| `useChat.ts` | (1) 装 fetch monkey-patch 过滤 `tools` stream_mode;(2) `StateType.files` 类型放宽为 `Record<string, RawFileEntry>`,`RawFileEntry = string \| { content: string \| string[]; encoding?: "utf-8" \| "base64" }`(string 形态保留给旧 checkpoint 兼容) | (1) 见 §3.3;(2) 让前端能消费 §2.5 的多格式 FileData |
+| `useChat.ts` | (1) 装 fetch monkey-patch 过滤 `tools` stream_mode;(2) `StateType.files` 类型放宽为 `Record<string, RawFileEntry>`,`RawFileEntry = string \| { content: string \| string[]; encoding?: "utf-8" \| "base64" }`(string 形态保留给旧 checkpoint 兼容);(3) `sendMessage` 的 `stream.submit` config 注入 `configurable.active_skills`(从 `lib/config.ts` 的 `getActiveSkillIds()` 读最新 localStorage 白名单),**不碰 (1) 的 fetch monkey-patch** | (1) 见 §3.3;(2) 让前端能消费 §2.5 的多格式 FileData;(3) per-run skill 白名单,见 §2.7 |
+| `ChatInterface.tsx` | (除 §3.2 broadcastResumeInterrupt 外)底部输入 bar 左侧新增 `<SkillsPopover />`(`flex justify-between` 行) | Skill 开关入口,见 §2.7 |
 | `generative-ui/{ResearchCard,ClarificationCard,registry}.tsx` | 新增本地组件 + registry。**`ResearchCard` 注册到 `LOCAL_UI_COMPONENTS` 走 generative-ui 通道**(后端 `emit_research_card` 调 `push_ui_message`,无 interrupt,正常持久化)。**`ClarificationCard` 不注册到 registry**,由 `ChatMessage.tsx` 直接渲染——`request_clarification` tool 内调 `interrupt()`,push_ui_message 在 interrupt 期间不持久化(§2.6 caveat),所以改从 `toolCall.args` 取数据渲染 | demo 卡片 |
 | `hooks/useResumeInterrupt.tsx` | 新增 React Context + Provider + hook | 让 generative-ui 组件不通过 prop drill 自取 resume callback;见 §2.6 |
 | `components/sidebar/TasksFilesSidebar.tsx` | 新增 `normalizeFileEntry()` 把 `RawFileEntry` 归一成 `FileItem`(`{path, content, encoding}`),encoding 字段透传给 `FileViewDialog`;多格式文件图标(html / docx / md 等) | 让前端能消费 §2.5 的多格式 FileData(string 旧形态 + `{content, encoding}` 新形态) |
 | `components/dialog/FileViewDialog.tsx` | encoding 路由(`encoding === "base64"` 走二进制占位卡 + atob 下载;`.html` 走 `<iframe srcDoc sandbox="allow-same-origin">`,**不**开 `allow-scripts`;`.md` 走 `MarkdownContent`;其他 utf-8 走 `SyntaxHighlighter`)+ `MIME_BY_EXT` 表(md / html / docx / pptx / pdf / json / txt) | §2.5 多格式渲染的前端核心路由 |
 | **SDD 测试基建(新增)**:`package.json`(test/e2e scripts + vitest/playwright/testing-library devDeps)、`vitest.config.ts`、`test/setup.ts`、`*.test.tsx`(组件 Test-Alongside)、`playwright.config.ts`、`e2e/`(E2E + fixtures) | 本地新增,vendored 副本上层 | SDD 三层测试落地(见 `docs/sdd/SDD-Guide.md §5`)。**上游 `git pull` 前同样要 `git diff` 留底**,否则这些新增文件 + package.json 改动会与上游冲突 |
+| **Skills(新增,v0.6.0/001)**:`package.json` 加 `@radix-ui/react-popover` 依赖 + `components/ui/popover.tsx`、`app/components/SkillsPopover.tsx`(+`.test.tsx`)、`lib/config.ts` 的 `activeSkillIds` 持久化 helpers、`e2e/skills-whitelist.spec.ts`(+fixture) | 本地新增,vendored 副本上层 | Skill 开关 UI + per-run 白名单,见 §2.7。新增依赖/文件 `git pull` 前同样 `git diff` 留底 |
 
 #### 3.1.1 ChatMessage.tsx 第 128 行的 task skip
 

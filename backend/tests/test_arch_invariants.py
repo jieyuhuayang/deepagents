@@ -61,3 +61,17 @@ def test_usechat_fetch_monkeypatch_present():
     src = _read(_USECHAT)
     assert "window.fetch" in src and "stream_mode" in src, \
         "useChat.ts 的 fetch monkey-patch(过滤 stream_mode 'tools')不得删除(§3.3)"
+
+
+# ── Skills(v0.6.0/001):GenerativeUI 仍在栈 + SkillWhitelist 排其前 ──────
+
+def test_skill_whitelist_before_generative_ui():
+    """AC-6:agent.py middleware 列表里 SkillWhitelistMiddleware 必须排在
+    GenerativeUIMiddleware 之前(保证白名单过滤先于 UI 字段注入,且 GenerativeUI
+    始终保留)。引入 Skills 后守护 §强约束 #1 不被新中间件挤掉。"""
+    src = _read(_AGENT)
+    assert "GenerativeUIMiddleware()" in src, "GenerativeUIMiddleware 必须仍在装配栈(§2.2)"
+    assert "SkillWhitelistMiddleware(" in src, "SkillWhitelistMiddleware 应已接入 build_agent"
+    swm = src.index("SkillWhitelistMiddleware(")
+    gui = src.index("GenerativeUIMiddleware()")
+    assert swm < gui, "SkillWhitelistMiddleware 必须排在 GenerativeUIMiddleware 之前(spec AC-6)"
