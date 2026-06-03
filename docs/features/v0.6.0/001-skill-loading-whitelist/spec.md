@@ -37,7 +37,7 @@
 
 | AC ID | 标准描述 | 验证方式 | 覆盖测试/任务 |
 |---|---|---|---|
-| AC-1 | `SkillWhitelistMiddleware` 按 `config.configurable.active_skills` 过滤注入:给定 2 个 skill 的 `skills_metadata`,`active_skills=["deep-research"]` 渲染的 system message 只含 deep-research;`None` 全注入;`[]` 零注入 | `pytest::test_skill_whitelist` | T3, T4 |
+| AC-1 | `SkillWhitelistMiddleware` 按 `config.configurable.active_skills` 过滤注入:给定 2 个 skill 的 `skills_metadata`,`active_skills=["deep-research"]` 渲染的 system message 只含 deep-research;`None` 全注入;`[]` 或过滤后无命中 → 整段 skills **不注入**(system prompt 保持原样,不留 "No skills available" 空壳) | `pytest::test_skill_whitelist` | T3, T4 |
 | AC-2 | `GET /api/skills` 返回 200 + 列表,含 deep-research,每项有 `{id,name,description,source,path}`,`id=="built-in/deep-research"`、`source=="built-in"` | `pytest::test_skills_routes` | T5, T6 |
 | AC-3 | `GET /api/skills/built-in/deep-research` 返回 200 + 非空 `instructions`(SKILL.md body);不存在的 id 返回 404 | `pytest::test_skills_routes` | T5, T6 |
 | AC-4 | `SkillsPopover` 渲染拉取到的 skill 列表;toggle 一个 Switch 翻转其激活态、active-count chip 同步、`deep-agent-config.activeSkillIds` 写入 localStorage | `vitest::SkillsPopover` | T8 |
@@ -59,7 +59,7 @@
 > 系统应正确处理但不属于主流程的场景。
 
 - **白名单缺省(旧客户端 / `/info` smoke)**:请求未带 `active_skills`(key 缺失)→ 中间件读到 `None` → **不过滤,全注入**(安全默认,兼容)。
-- **全部关闭**:`active_skills=[]` → 注入零 skill,system prompt 走 SkillsMiddleware 的 "(No skills available)" 分支,agent 正常对话不报错。
+- **全部关闭**:`active_skills=[]`(或过滤后无命中)→ 整段 skills **不注入**(system prompt 保持原样,不留 "(No skills available)" 空壳,对齐 PRD §5.2),agent 正常对话不报错。
 - **白名单含未知 skill 名**:`active_skills` 含磁盘上不存在的 name → 取交集,静默忽略,不报错。
 - **`get_config()` 在 graph run 之外被调用**(理论上中间件不会触发)→ try/except 兜底返回 `None`(不过滤)。
 - **`/api/skills/{id}` id 含斜杠**(`built-in/deep-research`)→ 用 `{skill_id:path}` 转换器匹配,避免 FastAPI 路径参数截断。
