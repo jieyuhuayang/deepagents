@@ -56,15 +56,27 @@ def _make_mw() -> SkillWhitelistMiddleware:
     )
 
 
+_BASE_PROMPT = "BASE-PROMPT"
+
+
 def _render(mw: SkillWhitelistMiddleware, metadata: list[dict], active, monkeypatch) -> str:
-    """跑一遍 modify_request,返回注入后的 system message 文本。"""
+    """跑一遍 modify_request,返回注入后的 system message 文本。
+
+    给一个非空 base system message,这样"整段不注入"时文本恰好等于 base,
+    可区分"注入了空 skills 段"与"完全没注入"。
+    """
+    from langchain_core.messages import SystemMessage
+
     monkeypatch.setattr(
         middlewares,
         "get_config",
         lambda: {"configurable": {"active_skills": active}} if active is not _SENTINEL
         else {"configurable": {}},
     )
-    req = FakeRequest(state={"skills_metadata": metadata})
+    req = FakeRequest(
+        state={"skills_metadata": metadata},
+        system_message=SystemMessage(content=_BASE_PROMPT),
+    )
     out = mw.modify_request(req)
     return str(out.system_message.content)
 
@@ -98,15 +110,18 @@ def test_missing_key_injects_all(two_skills, monkeypatch):
     assert "brand-guidelines" in text
 
 
-def test_empty_list_injects_none(two_skills, monkeypatch):
+def test_empty_list_injects_no_section(two_skills, monkeypatch):
+    # 全关 [] → 整段不注入:system message 保持 base 原样,不留空壳(PRD §5.2)
     text = _render(_make_mw(), two_skills, [], monkeypatch)
-    assert "deep-research" not in text
-    assert "brand-guidelines" not in text
-    assert "No skills available" in text  # SkillsMiddleware 的空分支
+    assert text == _BASE_PROMPT
+    assert "Available Skills" not in text
+    assert "No skills available" not in text
 
 
-def test_unknown_name_ignored(two_skills, monkeypatch):
+def test_unknown_name_injects_no_section(two_skills, monkeypatch):
+    # 白名单全是未知名 → 过滤后无命中 → 同样整段不注入
     text = _render(_make_mw(), two_skills, ["nonexistent"], monkeypatch)
+    assert text == _BASE_PROMPT
     assert "deep-research" not in text
     assert "brand-guidelines" not in text
 

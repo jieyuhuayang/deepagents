@@ -32,8 +32,9 @@ class SkillWhitelistMiddleware(SkillsMiddleware):
 
     - `active_skills = None`(或 configurable 无此键)→ **不过滤**,全注入(安全
       默认,兼容旧客户端 / `/info` smoke)。
-    - `active_skills = []`                          → 注入零 skill(显式全关)。
-    - `active_skills = [...]`                       → 按 name 取交集,未知名静默忽略。
+    - `active_skills = []` 或过滤后无命中               → **整段 skills 不注入**(不
+      留 "No skills available" 空壳;对齐 PRD §5.2)。
+    - `active_skills = [...]`                         → 按 name 取交集,未知名静默忽略。
 
     为什么过滤在 `modify_request` 渲染**之前**、而不是"注入后再 strip":基类把
     skills 段 append 到 system message,后注入的文本无法干净反注入(脆弱)。子类
@@ -47,12 +48,19 @@ class SkillWhitelistMiddleware(SkillsMiddleware):
 
     def modify_request(self, request: ModelRequest) -> ModelRequest:
         active = _active_skills()
-        if active is not None:
-            allow = set(active)
-            metadata = request.state.get("skills_metadata", [])
-            kept = [s for s in metadata if s["name"] in allow]
-            request = request.override(state={**request.state, "skills_metadata": kept})
-        return super().modify_request(request)
+        if active is None:
+            # 未传白名单 → 默认全注入(基类行为)
+            return super().modify_request(request)
+        allow = set(active)
+        metadata = request.state.get("skills_metadata", [])
+        kept = [s for s in metadata if s["name"] in allow]
+        if not kept:
+            # 白名单为空 / 无命中 → 整段 skills 不注入,system prompt 保持原样
+            # (避免基类渲染出 "No skills available" 空壳,对齐 PRD §5.2)。
+            return request
+        return super().modify_request(
+            request.override(state={**request.state, "skills_metadata": kept})
+        )
 
 
 def _active_skills() -> list[str] | None:
